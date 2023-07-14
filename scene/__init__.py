@@ -9,20 +9,22 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
+import json
 import os
 import random
-import json
-from utils.system_utils import searchForMaxIteration
+
+from arguments import ModelParams
 from scene.dataset_readers import sceneLoadTypeCallbacks
 from scene.gaussian_model import GaussianModel
-from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
+from utils.system_utils import searchForMaxIteration
+
 
 class Scene:
+    gaussians: GaussianModel
 
-    gaussians : GaussianModel
-
-    def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None, shuffle=True, resolution_scales=[1.0]):
+    def __init__(self, args: ModelParams, gaussians: GaussianModel, load_iteration=None, shuffle=True,
+                 resolution_scales=[1.0]):
         """b
         :param path: Path to colmap scene main folder.
         """
@@ -49,7 +51,8 @@ class Scene:
             assert False, "Could not recognize scene type!"
 
         if not self.loaded_iter:
-            with open(scene_info.ply_path, 'rb') as src_file, open(os.path.join(self.model_path, "input.ply") , 'wb') as dest_file:
+            with open(scene_info.ply_path, 'rb') as src_file, open(os.path.join(self.model_path, "input.ply"),
+                                                                   'wb') as dest_file:
                 dest_file.write(src_file.read())
             json_cams = []
             camlist = []
