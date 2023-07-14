@@ -1,10 +1,8 @@
-from typing import Sequence
-
-from itertools import chain
-
 import torch
 import torch.nn as nn
+from itertools import chain
 from torchvision import models
+from typing import Sequence
 
 from .utils import normalize_activation
 
