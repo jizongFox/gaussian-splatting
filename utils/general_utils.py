@@ -82,6 +82,12 @@ def strip_symmetric(sym):
 
 
 def build_rotation(r):
+    """
+    build rotation from quaternion to rotation matrix.
+    arguments:
+    r: quaternion with 4 elements.
+    return: Tensor, rotation matrix of bX3X3
+    """
     norm = torch.sqrt(r[:, 0] * r[:, 0] + r[:, 1] * r[:, 1] + r[:, 2] * r[:, 2] + r[:, 3] * r[:, 3])
 
     q = r / norm[:, None]

@@ -14,6 +14,7 @@ import numpy as np
 import os
 import sys
 from PIL import Image
+from loguru import logger
 from pathlib import Path
 from plyfile import PlyData, PlyElement
 from typing import NamedTuple
@@ -23,7 +24,6 @@ from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec
 from scene.gaussian_model import BasicPointCloud
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 from utils.sh_utils import SH2RGB
-from loguru import logger
 
 
 class CameraInfo(NamedTuple):
@@ -88,8 +88,8 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
         width = intr.width
 
         uid = intr.id
-        R = np.transpose(qvec2rotmat(extr.qvec))
-        T = np.array(extr.tvec)  # here the T is not -RT
+        R = np.transpose(qvec2rotmat(extr.qvec))  # R for c2w
+        T = np.array(extr.tvec)  # here the T is not -RT, T for w2c
 
         if intr.model == "SIMPLE_PINHOLE":
             focal_length_x = intr.params[0]
@@ -101,7 +101,8 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
             FovY = focal2fov(focal_length_y, height)
             FovX = focal2fov(focal_length_x, width)
         else:
-            assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
+            assert False, "Colmap camera model not handled: " \
+                          "only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
 
         image_path = os.path.join(images_folder, os.path.basename(extr.name))
         image_name = os.path.basename(image_path).split(".")[0]
@@ -153,7 +154,7 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
         cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
         cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
 
-    reading_dir = "images" if images == None else images
+    reading_dir = "images" if images is None else images
     cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics,
                                            images_folder=os.path.join(path, reading_dir))
     cam_infos = sorted(cam_infos_unsorted.copy(), key=lambda x: x.image_name)

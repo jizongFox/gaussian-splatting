@@ -12,6 +12,7 @@
 import json
 import os
 import random
+from loguru import logger
 
 from arguments import ModelParams
 from scene.dataset_readers import sceneLoadTypeCallbacks
@@ -72,16 +73,23 @@ class Scene:
         self.cameras_extent = scene_info.nerf_normalization["radius"]
 
         for resolution_scale in resolution_scales:
-            print("Loading Training Cameras")
-            self.train_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.train_cameras, resolution_scale, args)
-            print("Loading Test Cameras")
-            self.test_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.test_cameras, resolution_scale, args)
+            logger.debug("Loading Training Cameras")
+            self.train_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.train_cameras, resolution_scale,
+                                                                            args)
+            logger.debug(
+                f"Loaded {len(self.train_cameras[resolution_scale])} images at resolution scale {resolution_scale}")
+            logger.debug("Loading Test Cameras")
+            self.test_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.test_cameras, resolution_scale,
+                                                                           args)
+            logger.debug(
+                f"Loaded {len(self.train_cameras[resolution_scale])} images at resolution scale {resolution_scale}")
 
         if self.loaded_iter:
             self.gaussians.load_ply(os.path.join(self.model_path,
-                                                           "point_cloud",
-                                                           "iteration_" + str(self.loaded_iter),
-                                                           "point_cloud.ply"))
+                                                 "point_cloud",
+                                                 "iteration_" + str(self.loaded_iter),
+                                                 "point_cloud.ply"),
+                                    og_number_points=len(scene_info.point_cloud.points))
         else:
             self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
 

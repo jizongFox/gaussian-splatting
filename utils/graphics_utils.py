@@ -12,6 +12,7 @@
 import math
 import numpy as np
 import torch
+from torch import Tensor
 from typing import NamedTuple
 
 
@@ -32,6 +33,9 @@ def geom_transform_points(points, transf_matrix):
 
 
 def getWorld2View(R, t):
+    """
+    this returns the original world2camera matrix.
+    """
     Rt = np.zeros((4, 4))
     Rt[:3, :3] = R.transpose()
     Rt[:3, 3] = t
@@ -39,10 +43,16 @@ def getWorld2View(R, t):
     return np.float32(Rt)
 
 
-def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0):
+def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0) -> Tensor:
+    """
+    this gives the world2camera matrix which already takes the camera pose transformation,
+    such as centering and scaling.
+    return world to camera matrix of 4X4
+    """
+
     Rt = np.zeros((4, 4))
-    Rt[:3, :3] = R.transpose()
-    Rt[:3, 3] = t
+    Rt[:3, :3] = R.transpose()  # R for w2c
+    Rt[:3, 3] = t  # T for w2c
     Rt[3, 3] = 1.0
 
     C2W = np.linalg.inv(Rt)
