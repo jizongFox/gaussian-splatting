@@ -18,11 +18,12 @@ from pathlib import Path
 from plyfile import PlyData, PlyElement
 from typing import NamedTuple
 
-from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
-    read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
+from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, read_extrinsics_binary, \
+    read_intrinsics_binary, read_points3D_binary, read_points3D_text
 from scene.gaussian_model import BasicPointCloud
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 from utils.sh_utils import SH2RGB
+from loguru import logger
 
 
 class CameraInfo(NamedTuple):
@@ -48,6 +49,9 @@ class SceneInfo(NamedTuple):
 
 def getNerfppNorm(cam_info):
     def get_center_and_diag(cam_centers):
+        """
+        this function returns the center and the maximum norm of the camera poses.
+        """
         cam_centers = np.hstack(cam_centers)
         avg_cam_center = np.mean(cam_centers, axis=1, keepdims=True)
         center = avg_cam_center
@@ -85,7 +89,7 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
 
         uid = intr.id
         R = np.transpose(qvec2rotmat(extr.qvec))
-        T = np.array(extr.tvec)
+        T = np.array(extr.tvec)  # here the T is not -RT
 
         if intr.model == "SIMPLE_PINHOLE":
             focal_length_x = intr.params[0]
@@ -167,10 +171,11 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
     bin_path = os.path.join(path, "sparse/0/points3D.bin")
     txt_path = os.path.join(path, "sparse/0/points3D.txt")
     if not os.path.exists(ply_path):
-        print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
-        try:
+        logger.info("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
+        assert Path(bin_path).exists() or Path(txt_path).exists()
+        if Path(bin_path).exists():
             xyz, rgb, _ = read_points3D_binary(bin_path)
-        except:
+        else:
             xyz, rgb, _ = read_points3D_text(txt_path)
         storePly(ply_path, xyz, rgb)
     try:
