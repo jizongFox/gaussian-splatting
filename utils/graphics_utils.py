@@ -54,6 +54,29 @@ def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0):
 
 
 def getProjectionMatrix(znear, zfar, fovX, fovY):
+    """
+    todo: normalized device coordinates?
+    GPT4:
+    Yes, the function getProjectionMatrix(znear, zfar, fovX, fovY) you've provided is indeed creating a projection
+    matrix that transforms 3D coordinates into a normalized space, often referred to as Normalized Device Coordinates
+    (NDC).
+
+    In the context of 3D graphics, a projection matrix is used to transform the 3D coordinates of objects in a scene
+    into the 2D coordinates of the viewport. The projection matrix created by this function is a perspective projection
+    matrix, which means it also takes into account the perspective (or field of view) of the camera.
+
+    The parameters znear and zfar define the near and far clipping planes of the view frustum, which is the region of
+    space in the modeled world that may appear on the screen. fovX and fovY are the horizontal and vertical field
+     of view angles.
+
+    The resulting matrix will transform 3D points in the world such that points within the view frustum are mapped to
+    a cube of size 2x2x2 centered at the origin. These are the Normalized Device Coordinates.
+    The coordinates are then typically transformed again to map to the actual pixel coordinates of the viewport.
+
+    So, while the term "Normalized Device Coordinates" is not explicitly mentioned in the code,
+    the concept is indeed being used.
+    """
+
     tanHalfFovY = math.tan((fovY / 2))
     tanHalfFovX = math.tan((fovX / 2))
 
