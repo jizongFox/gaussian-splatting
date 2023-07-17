@@ -65,15 +65,25 @@ def cameraList_from_camInfos(cam_infos, resolution_scale, args):
 
 
 def camera_to_JSON(id, camera: Camera):
+    """
+    this function takes camera and save c2w matrix into json.
+    Some notations are wrong in this script.
+
+    The generated json should be the same, compared with nerfstudio,
+    except for opengl and manual rotation.
+
+    """
+
     Rt = np.zeros((4, 4))
-    Rt[:3, :3] = camera.R.transpose()
-    Rt[:3, 3] = camera.T
+    Rt[:3, :3] = camera.R.transpose()  # R from c2w, after transpose, it becomes w2c
+    Rt[:3, 3] = camera.T  # T from w2c
     Rt[3, 3] = 1.0
 
-    W2C = np.linalg.inv(Rt)
+    W2C = np.linalg.inv(Rt)  # this should be c2w, instead of w2c
     pos = W2C[:3, 3]
     rot = W2C[:3, :3]
     serializable_array_2d = [x.tolist() for x in rot]
+
     camera_entry = {
         'id': id,
         'img_name': camera.image_name,
