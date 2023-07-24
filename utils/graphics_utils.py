@@ -12,14 +12,13 @@
 import math
 import numpy as np
 import torch
-from torch import Tensor
 from typing import NamedTuple
 
 
 class BasicPointCloud(NamedTuple):
-    points: np.array
-    colors: np.array
-    normals: np.array
+    points: np.ndarray
+    colors: np.ndarray
+    normals: np.ndarray
 
 
 def geom_transform_points(points, transf_matrix):
@@ -43,7 +42,7 @@ def getWorld2View(R, t):
     return np.float32(Rt)
 
 
-def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0) -> Tensor:
+def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0) -> np.ndarray:
     """
     this gives the world2camera matrix which already takes the camera pose transformation,
     such as centering and scaling.
@@ -60,7 +59,7 @@ def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0) -> Tensor:
     cam_center = (cam_center + translate) * scale
     C2W[:3, 3] = cam_center
     Rt = np.linalg.inv(C2W)
-    return np.float32(Rt)
+    return Rt.astype(np.float32)  # type: ignore
 
 
 def getProjectionMatrix(znear, zfar, fovX, fovY):
