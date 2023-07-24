@@ -14,7 +14,7 @@ from os import makedirs
 import os
 import torch
 import torchvision
-from argparse import ArgumentParser
+from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams, get_combined_args
@@ -57,7 +57,7 @@ def render_sets(dataset: ModelParams, iteration: int, pipeline: PipelineParams, 
 
 if __name__ == "__main__":
     # Set up command line argument parser
-    parser = ArgumentParser(description="Testing script parameters")
+    parser = ArgumentParser(description="Testing script parameters", formatter_class=ArgumentDefaultsHelpFormatter)
     model = ModelParams(parser, sentinel=True)
     pipeline = PipelineParams(parser)
     parser.add_argument("--iteration", default=-1, type=int)
@@ -70,4 +70,6 @@ if __name__ == "__main__":
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
-    render_sets(model.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test)
+    modelconfig = model.extract(args)
+    modelconfig.eval = True
+    render_sets(modelconfig, args.iteration, pipeline.extract(args), args.skip_train, args.skip_test)
