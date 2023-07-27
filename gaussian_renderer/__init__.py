@@ -12,6 +12,7 @@
 import math
 import torch
 
+from debug.plotter import plot_3d_scatter
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh

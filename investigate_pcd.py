@@ -6,8 +6,8 @@ from torch import nn
 from tqdm import tqdm
 
 original_path = "output/50687083-5/point_cloud/iteration_30000/point_cloud.ply"
-modified_path = "tmp2.ply"
-output_path = "tmp3.ply"
+modified_path = "output/50687083-5/point_cloud/iteration_50000/modified.ply"
+output_path = "output/50687083-5/point_cloud/iteration_50000/point_cloud.ply"
 
 
 class ReadPCD:
@@ -84,15 +84,19 @@ class ReadPCD:
     def _construct_list_of_attributes(self):
         l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
         # All channels except the 3 DC
-        for i in range(self._features_dc.shape[1] * self._features_dc.shape[2]):
-            l.append('f_dc_{}'.format(i))
-        for i in range(self._features_rest.shape[1] * self._features_rest.shape[2]):
-            l.append('f_rest_{}'.format(i))
+        l.extend(
+            'f_dc_{}'.format(i)
+            for i in range(self._features_dc.shape[1] * self._features_dc.shape[2])
+        )
+        l.extend(
+            'f_rest_{}'.format(i)
+            for i in range(
+                self._features_rest.shape[1] * self._features_rest.shape[2]
+            )
+        )
         l.append('opacity')
-        for i in range(self._scaling.shape[1]):
-            l.append('scale_{}'.format(i))
-        for i in range(self._rotation.shape[1]):
-            l.append('rot_{}'.format(i))
+        l.extend('scale_{}'.format(i) for i in range(self._scaling.shape[1]))
+        l.extend('rot_{}'.format(i) for i in range(self._rotation.shape[1]))
         return l
 
     def create_mask_from_modified_ply(self, path):
@@ -103,6 +107,7 @@ class ReadPCD:
                         np.asarray(plydata.elements[0]["z"])), axis=1)
         xyz = torch.from_numpy(xyz).cuda()
         mask = torch.empty((self._xyz.shape[0],))
+
         for index_, cur_item in tqdm(enumerate(self._xyz), total=len(self._xyz)):
             mask[index_] = torch.any(torch.all(cur_item == xyz, dim=-1))
         return mask.detach().cpu().numpy()
@@ -112,14 +117,3 @@ pcd_manager = ReadPCD(3)
 pcd_manager.load_ply(original_path)
 mask = pcd_manager.create_mask_from_modified_ply(modified_path)
 pcd_manager.save_ply(output_path, mask=mask)
-
-#
-# xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
-#                 np.asarray(plydata.elements[0]["y"]),
-#                 np.asarray(plydata.elements[0]["z"])), axis=1)
-# opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
-#
-# features_dc = np.zeros((xyz.shape[0], 3, 1))
-# features_dc[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
-# features_dc[:, 1, 0] = np.asarray(plydata.elements[0]["f_dc_1"])
-# features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])

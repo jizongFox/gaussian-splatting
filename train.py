@@ -15,6 +15,7 @@ import torch
 import uuid
 from argparse import ArgumentParser, Namespace
 from random import randint
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams, OptimizationParams
@@ -24,16 +25,14 @@ from utils.general_utils import safe_state
 from utils.image_utils import psnr
 from utils.loss_utils import l1_loss, ssim
 
-from torch.utils.tensorboard import SummaryWriter
-
 TENSORBOARD_FOUND = True
 
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations):
+def training(dataset, opt, pipe, testing_iterations, saving_iterations, pcd_path=None):
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
 
-    scene = Scene(dataset, gaussians)
+    scene = Scene(dataset, gaussians, pcd_path=pcd_path)
     gaussians.training_setup(opt)
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
@@ -204,6 +203,7 @@ if __name__ == "__main__":
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--pcd", default=None, type=str, )
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
 
@@ -215,7 +215,7 @@ if __name__ == "__main__":
     # Start GUI server, configure and run training
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations)
+    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.pcd)
 
     # All done
     print("\nTraining complete.")
