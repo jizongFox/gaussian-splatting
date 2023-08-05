@@ -8,10 +8,14 @@ from loguru import logger
 cloud_name = "/home/jizong/Workspace/nerfstudio/data/flower_undist3/sparse_points.ply"
 
 
-def clip_near_far(camera_coordinates: np.ndarray, near: float, far: float) -> np.ndarray:
+def clip_near_far(
+    camera_coordinates: np.ndarray, near: float, far: float
+) -> np.ndarray:
     assert len(camera_coordinates.shape) == 2, camera_coordinates.shape
     if camera_coordinates.shape[1] == 4:
-        assert np.allclose(camera_coordinates[:, 3], np.ones_like(camera_coordinates[:, 3]))
+        assert np.allclose(
+            camera_coordinates[:, 3], np.ones_like(camera_coordinates[:, 3])
+        )
     z = camera_coordinates[:, 2]
     return camera_coordinates[(z >= near) & (z <= far)]
 
@@ -46,7 +50,10 @@ class Intrinsic:
         """
         pinhole camera matrix under opencv convention.
         """
-        camera_mtx = np.array([[self.f, 0, self.cx], [0.0, self.f, self.cy], [0.0, 0.0, 1.0]], dtype=np.float32)
+        camera_mtx = np.array(
+            [[self.f, 0, self.cx], [0.0, self.f, self.cy], [0.0, 0.0, 1.0]],
+            dtype=np.float32,
+        )
         full_camera_mtx = np.hstack([camera_mtx, np.array([0, 0, 0])[..., None]])
         return full_camera_mtx
 
@@ -57,8 +64,12 @@ class Intrinsic:
             [
                 [2 * self.f / self.w, 0.0, (self.w - 2 * self.cx) / self.w, 0.0],
                 [0.0, 2 * self.f / self.h, (self.h - 2 * self.cy) / self.h, 0.0],
-                [0.0, 0.0, (-self.far - self.near) / (self.far - self.near),
-                 -2.0 * self.far * self.near / (self.far - self.near)],
+                [
+                    0.0,
+                    0.0,
+                    (-self.far - self.near) / (self.far - self.near),
+                    -2.0 * self.far * self.near / (self.far - self.near),
+                ],
                 [0.0, 0.0, -1.0, 0.0],
             ]
         )
@@ -132,10 +143,16 @@ class World2Camera:
 
 def plot3D_pointcloud(pcd: np.ndarray):
     import plotly.express as px
+
     pcd = pcd[::20]
     batch_size = pcd.shape[0]
-    data = {"x": pcd[:, 0], "y": pcd[:, 1], "z": pcd[:, 2], "size": np.ones_like(pcd[:, 0]) * 1,
-            "c": ["red"] * batch_size}
+    data = {
+        "x": pcd[:, 0],
+        "y": pcd[:, 1],
+        "z": pcd[:, 2],
+        "size": np.ones_like(pcd[:, 0]) * 1,
+        "c": ["red"] * batch_size,
+    }
     fig = px.scatter_3d(data, x="x", y="y", z="z", size="size", color="c")
     fig.show()
 
@@ -146,7 +163,13 @@ def load_pointcloud(filename: str) -> np.ndarray:
     pointcloud_np = np.array(pointcloud.points)
     pointcloud_np = pointcloud_np[np.linalg.norm(pointcloud_np, axis=-1) < 2]
     pointcloud_np_homo = np.hstack(
-        [pointcloud_np, np.array([1])[None, ...].repeat(pointcloud_np.shape[0], axis=0, )]
+        [
+            pointcloud_np,
+            np.array([1])[None, ...].repeat(
+                pointcloud_np.shape[0],
+                axis=0,
+            ),
+        ]
     )
     return pointcloud_np_homo
 
@@ -171,7 +194,9 @@ def load_pointcloud(filename: str) -> np.ndarray:
 logger.info("Also computed from matrix multiplication")
 pointcloud_np_homo = load_pointcloud(filename=cloud_name)
 camera = Intrinsic(h=800, w=800, near=1, far=5, fov_degree=90)
-c2w = Camera2World(R=np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]), t=np.array([0, 0, -2]))
+c2w = Camera2World(
+    R=np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]), t=np.array([0, 0, -2])
+)
 
 xyz_camera = np.einsum("ij,bj->bi", c2w.to_world2camera().extrinsic, pointcloud_np_homo)
 xyz_camera = clip_near_far(xyz_camera, near=camera.near, far=camera.far)
@@ -181,12 +206,16 @@ pinhole_uvw = np.einsum("ij,nj->ni", camera.pinhole_camera_matrix, xyz_camera)
 
 pinhole_uv = pinhole_uvw[:, :2] / pinhole_uvw[:, -1:]
 pinhole_uv = pinhole_uv[
-    (pinhole_uv[:, 0] < camera.w) & (pinhole_uv[:, 0] >= 0) & (pinhole_uv[:, 1] < camera.h) & (pinhole_uv[:, 1] >= 0)]
+    (pinhole_uv[:, 0] < camera.w)
+    & (pinhole_uv[:, 0] >= 0)
+    & (pinhole_uv[:, 1] < camera.h)
+    & (pinhole_uv[:, 1] >= 0)
+]
 
 pinhole_uv = pinhole_uv.astype(np.uint32)
 
 screen_pinhole = np.zeros((camera.h, camera.w), dtype=np.uint8)
-for (cur_w, cur_h) in pinhole_uv:
+for cur_w, cur_h in pinhole_uv:
     screen_pinhole[cur_h, cur_w] = +1
     screen_pinhole[min(cur_h + 1, camera.h - 1), cur_w] = +1
     screen_pinhole[cur_h, min(cur_w + 1, camera.w - 1)] = +1
@@ -213,8 +242,13 @@ clip_point = np.einsum("ij,bj->bi", camera.opengl_projection_matrix, xyz_camera_
 # we get the point in NDC
 ndc_point = clip_point / clip_point[:, -1:]
 ndc_point = ndc_point[
-    (ndc_point[:, 0] >= -1) & (ndc_point[:, 0] <= 1) & (ndc_point[:, 1] >= -1) & (ndc_point[:, 1] <= 1) & \
-    (ndc_point[:, 2] >= -1) & (ndc_point[:, 2] <= 1)]
+    (ndc_point[:, 0] >= -1)
+    & (ndc_point[:, 0] <= 1)
+    & (ndc_point[:, 1] >= -1)
+    & (ndc_point[:, 1] <= 1)
+    & (ndc_point[:, 2] >= -1)
+    & (ndc_point[:, 2] <= 1)
+]
 
 plot3D_pointcloud(ndc_point)
 # we get the screen coordinates
@@ -226,7 +260,7 @@ viewport_point[:, 1] = camera.h - viewport_point[:, 1]
 viewport_point = viewport_point.astype(np.uint32)
 
 screen_opengl = np.zeros((camera.h, camera.w), dtype=np.uint8)
-for (cur_w, cur_h, *_) in viewport_point:
+for cur_w, cur_h, *_ in viewport_point:
     screen_opengl[cur_h, cur_w] = +1
     screen_opengl[min(cur_h + 1, camera.h - 1), cur_w] = +1
     screen_opengl[cur_h, min(cur_w + 1, camera.w - 1)] = +1
@@ -236,7 +270,9 @@ plt.figure()
 plt.imshow(screen_opengl)
 # assert np.allclose(screen_opengl, screen_pinhole)
 plt.figure()
-plt.imshow(np.abs((screen_opengl > 0).astype(float) - (screen_pinhole > 0).astype(float)))
+plt.imshow(
+    np.abs((screen_opengl > 0).astype(float) - (screen_pinhole > 0).astype(float))
+)
 plt.title("diff")
 plt.show(block=True)
 

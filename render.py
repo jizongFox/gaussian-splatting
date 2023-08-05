@@ -3,7 +3,7 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 # All rights reserved.
 #
-# This software is free for non-commercial, research and evaluation use 
+# This software is free for non-commercial, research and evaluation use
 # under the terms of the LICENSE.md file.
 #
 # For inquiries contact  george.drettakis@inria.fr
@@ -34,12 +34,22 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         rendering = render(view, gaussians, pipeline, background)["render"]
         gt = view.original_image[0:3, :, :]
-        torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
-        torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
+        torchvision.utils.save_image(
+            rendering, os.path.join(render_path, "{0:05d}".format(idx) + ".png")
+        )
+        torchvision.utils.save_image(
+            gt, os.path.join(gts_path, "{0:05d}".format(idx) + ".png")
+        )
 
 
 @torch.no_grad()
-def render_sets(dataset: ModelParams, iteration: int, pipeline: PipelineParams, skip_train: bool, skip_test: bool):
+def render_sets(
+    dataset: ModelParams,
+    iteration: int,
+    pipeline: PipelineParams,
+    skip_train: bool,
+    skip_test: bool,
+):
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
 
@@ -47,17 +57,34 @@ def render_sets(dataset: ModelParams, iteration: int, pipeline: PipelineParams, 
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
     if not skip_train:
-        render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline,
-                   background)
+        render_set(
+            dataset.model_path,
+            "train",
+            scene.loaded_iter,
+            scene.getTrainCameras(),
+            gaussians,
+            pipeline,
+            background,
+        )
 
     if not skip_test:
-        render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline,
-                   background)
+        render_set(
+            dataset.model_path,
+            "test",
+            scene.loaded_iter,
+            scene.getTestCameras(),
+            gaussians,
+            pipeline,
+            background,
+        )
 
 
 if __name__ == "__main__":
     # Set up command line argument parser
-    parser = ArgumentParser(description="Testing script parameters", formatter_class=ArgumentDefaultsHelpFormatter)
+    parser = ArgumentParser(
+        description="Testing script parameters",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+    )
     model = ModelParams(parser, sentinel=True)
     pipeline = PipelineParams(parser)
     parser.add_argument("--iteration", default=-1, type=int)
@@ -72,4 +99,10 @@ if __name__ == "__main__":
 
     modelconfig = model.extract(args)
     modelconfig.eval = True
-    render_sets(modelconfig, args.iteration, pipeline.extract(args), args.skip_train, args.skip_test)
+    render_sets(
+        modelconfig,
+        args.iteration,
+        pipeline.extract(args),
+        args.skip_train,
+        args.skip_test,
+    )

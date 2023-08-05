@@ -9,5 +9,5 @@ def plot_3d_scatter(xyz):
     xyz = xyz[::10]
 
     data = {"x": xyz[:, 0], "y": xyz[:, 1], "z": xyz[:, 2]}
-    fig = px.scatter_3d(data, x='x', y='y', z='z')
+    fig = px.scatter_3d(data, x="x", y="y", z="z")
     fig.show()
