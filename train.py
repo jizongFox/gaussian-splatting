@@ -14,6 +14,7 @@ import sys
 import torch
 import uuid
 from argparse import ArgumentParser, Namespace
+from loguru import logger
 from random import randint
 from tqdm import tqdm
 
@@ -125,6 +126,8 @@ def training(
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
             1.0 - ssim(image, gt_image)
         )
+        opacity_mean = gaussians.opacity[render_pkg["visibility_filter"]].mean()
+        loss = loss + opacity_mean * 0.0
         loss.backward()
 
         iter_end.record()
@@ -172,6 +175,7 @@ def training(
                     size_threshold = (
                         20 if iteration > opt.opacity_reset_interval else None
                     )
+                    logger.trace("calling densify_and_prune")
                     gaussians.densify_and_prune(
                         opt.densify_grad_threshold,
                         0.005,
@@ -182,6 +186,7 @@ def training(
                 if iteration % opt.opacity_reset_interval == 0 or (
                     dataset.white_background and iteration == opt.densify_from_iter
                 ):
+                    logger.trace("calling reset_opacity")
                     gaussians.reset_opacity()
 
             # Optimizer step
@@ -297,10 +302,10 @@ def training_report(
 
         if tb_writer:
             tb_writer.add_histogram(
-                "scene/opacity_histogram", scene.gaussians.get_opacity, iteration
+                "scene/opacity_histogram", scene.gaussians.opacity, iteration
             )
             tb_writer.add_scalar(
-                "total_points", scene.gaussians.get_xyz.shape[0], iteration
+                "total_points", scene.gaussians.xyz.shape[0], iteration
             )
         torch.cuda.empty_cache()
 

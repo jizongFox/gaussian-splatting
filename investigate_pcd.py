@@ -1,20 +1,18 @@
 # this is to investigate the pcd dataformat
 import math
-from pathlib import Path
-
 import numpy as np
 import plotly.express as px
 import torch
+from loguru import logger
+from pathlib import Path
 from plyfile import PlyData, PlyElement
 from torch import Tensor
 from torch import nn
 from tqdm import tqdm
 
-original_path = "output/50687083-5/point_cloud/iteration_30000/point_cloud.ply"
-modified_path = "output/jizong_meetingroom/backup/Peng/point_cloud2/point_cloud2.ply"
-output_path = (
-    "output/jizong_meetingroom/backup/Peng/point_cloud2/point_cloud2_output.ply"
-)
+original_path = "/home/jizong/Workspace/gaussian-splatting/output/opacity_reduce_1e-2_render_optim_false/point_cloud/iteration_30000/point_cloud.ply"
+# modified_path = "output/jizong_meetingroom/backup/Peng/point_cloud2/point_cloud2.ply"
+output_path = "/home/jizong/Workspace/gaussian-splatting/output/opacity_reduce_1e-2_render_optim_false/point_cloud/iteration_130000/point_cloud.ply"
 
 
 class ReadPCD:
@@ -206,13 +204,38 @@ class ReadPCD:
         )
         fig.show()
 
+    def create_mask_based_on_opacity(self, threshold: float):
+        assert 0 <= threshold <= 1, threshold
+        opacity = torch.sigmoid(self._opacity)
+        min_opacity = opacity.min()
+        if threshold <= min_opacity:
+            logger.warning("threshold smaller than lower bound")
+        mask = opacity > threshold
+        mask = mask.detach().cpu().numpy().squeeze(1)
+
+        return mask
+
+    def create_mask_based_on_3d_scale(
+        self, min_thres: float = 0, max_thres: float = 10000
+    ):
+        scales = torch.exp(self._scaling)
+        min_scale = scales.min(dim=1)[0]
+        max_scale = scales.max(dim=1)[0]
+        max_min_div = max_scale / (min_scale + 1e-8)
+        mask = torch.logical_and(max_min_div <= max_thres, max_min_div >= min_thres)
+        mask = mask.detach().cpu().numpy()
+
+        return mask
+
 
 pcd_manager = ReadPCD(3)
 pcd_manager.load_ply(original_path)
+mask = pcd_manager.create_mask_based_on_opacity(0.00002)
+mask2 = pcd_manager.create_mask_based_on_3d_scale(1, 1e4)
 
 # pcd_manager.plot_3d(downscale_ratio=500)
 # mask =pcd_manager.de
 # mask = pcd_manager.create_mask_from_modified_ply(modified_path)
 # pcd_manager.change_transparency(~mask, new_transparency=0)
 
-pcd_manager.save_ply(output_path, mask)
+pcd_manager.save_ply(output_path, mask & mask2)

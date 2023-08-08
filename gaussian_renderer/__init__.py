@@ -12,7 +12,6 @@
 import math
 import torch
 
-from debug.plotter import plot_3d_scatter
 from diff_gaussian_rasterization import (
     GaussianRasterizationSettings,
     GaussianRasterizer,
@@ -38,7 +37,7 @@ def render(
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
     screenspace_points = (
         torch.zeros_like(
-            pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda"
+            pc.xyz, dtype=pc.xyz.dtype, requires_grad=True, device="cuda"
         )
         + 0
     )
@@ -68,9 +67,9 @@ def render(
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
 
-    means3D = pc.get_xyz
+    means3D = pc.xyz
     means2D = screenspace_points
-    opacity = pc.get_opacity
+    opacity = pc.opacity
 
     # If precomputed 3d covariance is provided, use it. If not, then it will be computed from
     # scaling / rotation by the rasterizer.
@@ -78,10 +77,10 @@ def render(
     rotations = None
     cov3D_precomp = None
     if pipe.compute_cov3D_python:
-        cov3D_precomp = pc.get_covariance(scaling_modifier)
+        cov3D_precomp = pc.covariance(scaling_modifier)
     else:
-        scales = pc.get_scaling
-        rotations = pc.get_rotation
+        scales = pc.scaling
+        rotations = pc.rotation
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
@@ -92,7 +91,7 @@ def render(
             shs_view = pc.get_features.transpose(1, 2).view(
                 -1, 3, (pc.max_sh_degree + 1) ** 2
             )
-            dir_pp = pc.get_xyz - viewpoint_camera.camera_center.repeat(
+            dir_pp = pc.xyz - viewpoint_camera.camera_center.repeat(
                 pc.get_features.shape[0], 1
             )
             dir_pp_normalized = dir_pp / dir_pp.norm(dim=1, keepdim=True)
