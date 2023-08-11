@@ -275,12 +275,12 @@ class ReadPCD:
 
     def offline_change_opacity(self):
         opacity = torch.sigmoid(self._opacity)
-        ranged_opacity = opacity * 2 - 1
+        ranged_opacity = opacity ** 2 * 2 - 1
 
         def odd_pow(input, exponent):
             return input.sign() * input.abs().pow(exponent)
 
-        rescaled_opacity = (odd_pow(ranged_opacity, 1 / 5) + 1) / 2
+        rescaled_opacity = (odd_pow(ranged_opacity, 1 / 11) + 1) / 2
 
         def _inverse_sigmoid(value: Tensor):
             value.clip_(1e-5, 0.9999)
@@ -304,6 +304,6 @@ pcd_manager.load_ply(original_path)
 # pcd_manager.change_transparency(~mask, new_transparency=0)
 pcd_manager.offline_change_opacity()
 # mask2 = pcd_manager.create_mask_based_on_3d_scale(1, 1000)
-mask = pcd_manager.create_mask_based_on_opacity(0.025)
+mask = pcd_manager.create_mask_based_on_opacity(0.001)
 
 pcd_manager.save_ply(output_path, mask)
