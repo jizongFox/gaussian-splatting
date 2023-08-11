@@ -286,6 +286,7 @@ class GaussianModel:
         el = PlyElement.describe(elements, "vertex")
         PlyData([el]).write(path)
 
+    @torch.no_grad()
     def reset_opacity(self):
         opacities_new = inverse_sigmoid(
             torch.min(self.opacity, torch.ones_like(self.opacity) * 0.01)
@@ -567,6 +568,7 @@ class GaussianModel:
             new_rotation,
         )
 
+    @torch.no_grad()
     def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size, opacity_percentage: float = None):
         grads = self.xyz_gradient_accum / self.denom
         grads[grads.isnan()] = 0.0
