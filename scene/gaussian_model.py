@@ -490,7 +490,7 @@ class GaussianModel:
         self.denom = torch.zeros((self.xyz.shape[0], 1), device="cuda")
         self.max_radii2D = torch.zeros((self.xyz.shape[0]), device="cuda")
 
-    def densify_and_split(self, grads, grad_threshold, scene_extent, N=3):
+    def densify_and_split(self, grads, grad_threshold, scene_extent, N=2):
         n_init_points = self.xyz.shape[0]
         # Extract points that satisfy the gradient condition
         padded_grad = torch.zeros((n_init_points), device="cuda")
@@ -499,12 +499,6 @@ class GaussianModel:
         selected_pts_mask = torch.logical_and(
             selected_pts_mask,
             torch.max(self.scaling, dim=1).values > self.percent_dense * scene_extent,
-        )
-        selected_pts_mask = torch.logical_or(
-            selected_pts_mask,
-            torch.max(self.scaling, dim=1).values
-            / (torch.min(self.scaling, dim=1).values + 1e-9)
-            > 2000,
         )
 
         stds = self.scaling[selected_pts_mask].repeat(N, 1)
