@@ -127,7 +127,7 @@ def training(
             1.0 - ssim(image, gt_image)
         )
         opacity_mean = gaussians.opacity[render_pkg["visibility_filter"]].mean()
-        loss = loss + opacity_mean * 0.0
+        loss = loss + opacity_mean * 1e-2
         loss.backward()
 
         iter_end.record()
@@ -136,7 +136,7 @@ def training(
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             if iteration % 10 == 0:
-                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
+                progress_bar.set_postfix({"pls": f"{gaussians._xyz.shape[0]:.1e}", "Loss": f"{ema_loss_for_log:.{7}f}"})
                 progress_bar.update(10)
             if iteration == opt.iterations:
                 progress_bar.close()
@@ -321,10 +321,10 @@ if __name__ == "__main__":
     parser.add_argument("--debug_from", type=int, default=-1)
     parser.add_argument("--detect_anomaly", action="store_true", default=False)
     parser.add_argument(
-        "--test_iterations", nargs="+", type=int, default=[7_000, 30_000]
+        "--test_iterations", nargs="+", type=int, default=[3_000, 7_000, 15_000, 30_000]
     )
     parser.add_argument(
-        "--save_iterations", nargs="+", type=int, default=[7_000, 30_000]
+        "--save_iterations", nargs="+", type=int, default=[3_000, 7_000, 15_000, 30_000]
     )
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])

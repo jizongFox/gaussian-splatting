@@ -12,11 +12,20 @@ from torch import Tensor
 from torch import nn
 from tqdm import tqdm
 
-original_path = "/home/jizong/Workspace/gaussian-splatting/output/opacity_reduce_1e-2_render_optim_false/point_cloud/iteration_30000/point_cloud.ply"
+original_path = "/home/jizong/Workspace/gaussian-splatting/output/0812_with_sparsity_loss/white/baseline/point_cloud/iteration_30000/point_cloud.ply"
 # modified_path = "output/jizong_meetingroom/backup/Peng/point_cloud2/point_cloud2.ply"
-output_path = "/home/jizong/Workspace/gaussian-splatting/output/opacity_reduce_1e-2_render_optim_false/point_cloud/iteration_130000/point_cloud.ply"
+output_path = "/home/jizong/Workspace/gaussian-splatting/output/0812_with_sparsity_loss/white/baseline/point_cloud/iteration_130000/point_cloud.ply"
 
 torch.set_grad_enabled(False)
+
+
+def _inverse_sigmoid(value):
+    if value < 1e-5:
+        return -10000
+    if value > 1e-5:
+        return 10000
+    assert 0 < value < 1, value
+    return math.log(value / (1 - value))
 
 
 class ReadPCD:
@@ -181,13 +190,6 @@ class ReadPCD:
         return mask.detach().cpu().numpy()
 
     def change_transparency(self, mask, new_transparency):
-        def _inverse_sigmoid(value):
-            if value < 1e-5:
-                return -10000
-            if value > 1e-5:
-                return 10000
-            assert 0 < value < 1, value
-            return math.log(value / (1 - value))
 
         with torch.no_grad():
             self._opacity[~mask] = _inverse_sigmoid(new_transparency)
@@ -220,7 +222,7 @@ class ReadPCD:
         return mask
 
     def create_mask_based_on_3d_scale(
-        self, min_thres: float = 0, max_thres: float = 10000
+            self, min_thres: float = 0, max_thres: float = 10000
     ):
         scales = torch.exp(self._scaling)
         min_scale = scales.min(dim=1)[0]
@@ -260,8 +262,8 @@ class ReadPCD:
         )
         pcd.colors = o3d.utility.Vector3dVector(
             (
-                mean_distance[..., None]
-                * torch.exp(-self._xyz.norm(dim=-1, keepdim=True) / 3)
+                    mean_distance[..., None]
+                    * torch.exp(-self._xyz.norm(dim=-1, keepdim=True) / 3)
             )
             .repeat(1, 3)
             .cpu()
@@ -271,12 +273,28 @@ class ReadPCD:
 
         # this mean distance should be colaborate with xyz range.
 
+    def offline_change_opacity(self):
+        opacity = torch.sigmoid(self._opacity)
+        ranged_opacity = opacity * 2 - 1
+
+        def odd_pow(input, exponent):
+            return input.sign() * input.abs().pow(exponent)
+
+        rescaled_opacity = (odd_pow(ranged_opacity, 1 / 5) + 1) / 2
+
+        def _inverse_sigmoid(value: Tensor):
+            value.clip_(1e-5, 0.9999)
+            return torch.log(value / (1 - value))
+
+        self._opacity = _inverse_sigmoid(rescaled_opacity)
+
 
 pcd_manager = ReadPCD(3)
+mask = None
 pcd_manager.load_ply(original_path)
 
 # mask = pcd_manager.remove_outlier()
-pcd_manager.get_knn_distance()
+# pcd_manager.get_knn_distance()
 # mask = pcd_manager.create_mask_based_on_opacity(0.05)
 # mask2 = pcd_manager.create_mask_based_on_3d_scale(1, 1e4)
 
@@ -284,5 +302,8 @@ pcd_manager.get_knn_distance()
 # mask =pcd_manager.de
 # mask = pcd_manager.create_mask_from_modified_ply(modified_path)
 # pcd_manager.change_transparency(~mask, new_transparency=0)
+pcd_manager.offline_change_opacity()
+# mask2 = pcd_manager.create_mask_based_on_3d_scale(1, 1000)
+mask = pcd_manager.create_mask_based_on_opacity(0.025)
 
-pcd_manager.save_ply(output_path)
+pcd_manager.save_ply(output_path, mask)

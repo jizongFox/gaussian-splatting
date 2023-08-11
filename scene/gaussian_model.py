@@ -501,6 +501,14 @@ class GaussianModel:
             torch.max(self.scaling, dim=1).values > self.percent_dense * scene_extent,
         )
 
+        # scale_mask = (torch.max(self.scaling, dim=1).values / (torch.min(self.scaling, dim=1).values + 1e-9)
+        #               > 2000)
+        #
+        # selected_pts_mask = torch.logical_and(
+        #     selected_pts_mask,
+        #     scale_mask
+        # )
+
         stds = self.scaling[selected_pts_mask].repeat(N, 1)
         means = torch.zeros((stds.size(0), 3), device="cuda")
         samples = torch.normal(mean=means, std=stds)
@@ -559,7 +567,7 @@ class GaussianModel:
             new_rotation,
         )
 
-    def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size):
+    def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size, opacity_percentage: float = None):
         grads = self.xyz_gradient_accum / self.denom
         grads[grads.isnan()] = 0.0
 
@@ -573,7 +581,25 @@ class GaussianModel:
             prune_mask = torch.logical_or(
                 torch.logical_or(prune_mask, big_points_vs), big_points_ws
             )
+
+        # scale_mask = (torch.max(self.scaling, dim=1).values / (torch.min(self.scaling, dim=1).values + 1e-9)
+        #               > 10000)
+        # if scale_mask.float().sum() > 0:
+        #     logger.trace(f"split based on scale range :{scale_mask.float().sum():.1e}.")
+        #
+        # prune_mask = torch.logical_or(
+        #     prune_mask,
+        #     scale_mask
+        # )
+
         self.prune_points(prune_mask)
+
+        # if opacity_percentage is not None:
+        #     dist_weighted_opacity = self.opacity * (
+        #             0.5 * torch.exp(-1 / (self.xyz.norm(dim=-1, keepdim=True) + 1)) + 0.5)
+        #     threshold = torch.quantile(dist_weighted_opacity, opacity_percentage)
+        #     prune_mask = (dist_weighted_opacity < threshold).squeeze(-1)  # noqa
+        #     self.prune_points(prune_mask)
 
         torch.cuda.empty_cache()
 
