@@ -1,11 +1,13 @@
 # this is to investigate the pcd dataformat
 import math
 import numpy as np
+import open3d as o3d
 import plotly.express as px
 import torch
 from loguru import logger
 from pathlib import Path
 from plyfile import PlyData, PlyElement
+from pytorch3d import ops as p3dops
 from torch import Tensor
 from torch import nn
 from tqdm import tqdm
@@ -13,6 +15,8 @@ from tqdm import tqdm
 original_path = "/home/jizong/Workspace/gaussian-splatting/output/opacity_reduce_1e-2_render_optim_false/point_cloud/iteration_30000/point_cloud.ply"
 # modified_path = "output/jizong_meetingroom/backup/Peng/point_cloud2/point_cloud2.ply"
 output_path = "/home/jizong/Workspace/gaussian-splatting/output/opacity_reduce_1e-2_render_optim_false/point_cloud/iteration_130000/point_cloud.ply"
+
+torch.set_grad_enabled(False)
 
 
 class ReadPCD:
@@ -227,15 +231,58 @@ class ReadPCD:
 
         return mask
 
+    def remove_outlier(self):
+        # remove outliers based on nerfstudio's method
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(
+            self._xyz.detach().float().cpu().numpy()
+        )
+
+        new_pcd, ind = pcd.remove_statistical_outlier(nb_neighbors=10, std_ratio=10.0)
+        mask = torch.zeros(self._xyz.shape[0], device=self._xyz.device).bool()
+        mask[ind] = True
+        return mask.cpu().detach().numpy()
+
+    def get_knn_distance(self):
+        # using pytorch3d to get knn distance
+
+        # here the knn distance is weighted by the distance to the center of the object so that the
+        # colored ply are pixels to be removed.
+
+        result = p3dops.knn_points(
+            p1=self._xyz[None, ...], p2=self._xyz[None, ...][:, ::2], K=100
+        )[0][0]
+        mean_distance = result.mean(dim=-1)
+
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(
+            self._xyz.detach().float().cpu().numpy()
+        )
+        pcd.colors = o3d.utility.Vector3dVector(
+            (
+                mean_distance[..., None]
+                * torch.exp(-self._xyz.norm(dim=-1, keepdim=True) / 3)
+            )
+            .repeat(1, 3)
+            .cpu()
+            .numpy()
+        )
+        o3d.io.write_point_cloud("test.ply", pcd)
+
+        # this mean distance should be colaborate with xyz range.
+
 
 pcd_manager = ReadPCD(3)
 pcd_manager.load_ply(original_path)
-mask = pcd_manager.create_mask_based_on_opacity(0.00002)
-mask2 = pcd_manager.create_mask_based_on_3d_scale(1, 1e4)
+
+# mask = pcd_manager.remove_outlier()
+pcd_manager.get_knn_distance()
+# mask = pcd_manager.create_mask_based_on_opacity(0.05)
+# mask2 = pcd_manager.create_mask_based_on_3d_scale(1, 1e4)
 
 # pcd_manager.plot_3d(downscale_ratio=500)
 # mask =pcd_manager.de
 # mask = pcd_manager.create_mask_from_modified_ply(modified_path)
 # pcd_manager.change_transparency(~mask, new_transparency=0)
 
-pcd_manager.save_ply(output_path, mask & mask2)
+pcd_manager.save_ply(output_path)
