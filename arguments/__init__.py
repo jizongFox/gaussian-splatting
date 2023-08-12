@@ -58,9 +58,9 @@ class ModelParams(ParamGroup):
         self._model_path = ""
         self._images = "images"
         self._resolution = -1
-        self._white_background = False
+        self._white_background = True
         self.data_device = "cuda"
-        self.eval = False
+        self.eval = True
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -91,9 +91,9 @@ class OptimizationParams(ParamGroup):
         self.percent_dense = 0.01  # this is to reduce the size of the eclipse
         self.lambda_dssim = 0.2
         self.densification_interval = 200
-        self.opacity_reset_interval = 2500
+        self.opacity_reset_interval = 2000
         self.densify_from_iter = 300
-        self.densify_until_iter = 10_000
+        self.densify_until_iter = 4_000
         self.densify_grad_threshold = 0.0002  # this is to split more
         super().__init__(parser, "Optimization Parameters")
 

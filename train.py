@@ -50,7 +50,7 @@ def training(
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
 
-    bg_color = [1, 1, 1]
+    bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
     iter_start = torch.cuda.Event(enable_timing=True)
@@ -225,11 +225,13 @@ def training(
             ):
                 logger.trace("calling reset_opacity")
                 gaussians.reset_opacity()
-        else:
-            # after having densified the pcd, we should prune the invisibile 3d gaussians.
-            if iteration % 2000 == 0:
-                opacity_mask = gaussians.opacity[visibility_filter] <= 0.005
-                gaussians.prune_points(opacity_mask)
+        elif iteration == opt.densify_until_iter:
+            logger.info("do not densify points.")
+        # else:
+        #     # after having densified the pcd, we should prune the invisibile 3d gaussians.
+        #     if iteration % 2000 == 0:
+        #         opacity_mask = gaussians.opacity[visibility_filter] <= 0.005
+        #         gaussians.prune_points(opacity_mask)
 
         # Optimizer step
         gaussians.optimizer.step()
@@ -254,10 +256,10 @@ if __name__ == "__main__":
     parser.add_argument("--debug_from", type=int, default=-1)
     parser.add_argument("--detect_anomaly", action="store_true", default=False)
     parser.add_argument(
-        "--test_iterations", nargs="+", type=int, default=[5000, 7_000, 15_000, ]
+        "--test_iterations", nargs="+", type=int, default=[5000, 7_000, 10_000, 12_500, 15_000, ]
     )
     parser.add_argument(
-        "--save_iterations", nargs="+", type=int, default=[5000, 7_000, 15_000, ]
+        "--save_iterations", nargs="+", type=int, default=[5000, 7_000, 10_000, 12_500, 15_000, ]
     )
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
