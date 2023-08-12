@@ -204,15 +204,15 @@ def training(
             gaussians.add_densification_stats(
                 viewspace_point_tensor, visibility_filter
             )
+            size_threshold = (
+                12 if iteration > opt.opacity_reset_interval else None
+            )
 
             if (
                     iteration > opt.densify_from_iter
                     and iteration % opt.densification_interval == 0
-                    and int(get_gpu_memory()) > 500
+                    and int(get_gpu_memory()) > 250
             ):
-                size_threshold = (
-                    12 if iteration > opt.opacity_reset_interval else None
-                )
                 logger.trace("calling densify_and_prune")
                 gaussians.densify_and_prune(
                     opt.densify_grad_threshold,
@@ -220,6 +220,16 @@ def training(
                     scene.cameras_extent,
                     size_threshold,
                 )
+            if int(get_gpu_memory()) < 250:
+                # that means the previous block does not happen
+                prune_mask = (gaussians.opacity < 0.005).squeeze()
+                if size_threshold:
+                    big_points_vs: Tensor = self.max_radii2D > max_screen_size  # noqa
+                    big_points_ws = gaussians.scaling.max(dim=1).values > 0.1 * scene.cameras_extent
+                    prune_mask = torch.logical_or(
+                        torch.logical_or(prune_mask, big_points_vs), big_points_ws
+                    )
+                gaussians.prune_points(prune_mask)
 
             if iteration % opt.opacity_reset_interval == 0 or (
                     dataset.white_background and iteration == opt.densify_from_iter
@@ -273,7 +283,6 @@ if __name__ == "__main__":
     jizong_parser.add_argument("--pcd-path", type=str, default=None, help="load pcd file")
     jizong_parser.add_argument("--prune-after-densification", default=False, action="store_true",
                                help="prune after densification")
-
 
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
