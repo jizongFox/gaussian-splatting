@@ -5,8 +5,7 @@ from argparse import Namespace
 from torch.utils.tensorboard import SummaryWriter
 
 from scene import Scene
-from train import TENSORBOARD_FOUND
-from utils.image_utils import psnr
+from .image_utils import psnr
 
 
 @torch.no_grad()
@@ -117,9 +116,5 @@ def prepare_output_and_logger(args):
         cfg_log_f.write(str(Namespace(**vars(args))))
 
     # Create Tensorboard writer
-    tb_writer = None
-    if TENSORBOARD_FOUND:
-        tb_writer = SummaryWriter(args.model_path)
-    else:
-        print("Tensorboard not available: not logging progress")
+    tb_writer = SummaryWriter(args.model_path)
     return tb_writer
