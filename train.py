@@ -11,18 +11,17 @@
 import os
 import random
 import sys
-from argparse import ArgumentParser
-from random import randint
-
 import torch
+from argparse import ArgumentParser
 from loguru import logger
+from random import randint
 from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from gaussian_renderer import render, network_gui
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, ssim, l2_loss, tv_loss, Entropy
+from utils.loss_utils import l1_loss, ssim, l2_loss, tv_loss, Entropy, hsv_color_space_loss
 from utils.system_utils import get_hash
 from utils.train_utils import training_report, prepare_output_and_logger
 
@@ -131,7 +130,7 @@ def training(
         if args.loss_config is not None:
             if args.loss_config == "naive":
                 loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
-                    1.0 - ssim(image, gt_image)
+                        1.0 - ssim(image, gt_image)
                 )
             elif args.loss_config == "l1":
                 loss = Ll1
@@ -145,6 +144,13 @@ def training(
                 loss = 1.0 - ssim(image, gt_image, window_size=5)
             elif args.loss_config == "tv":
                 loss = tv_loss(image[None, ...], gt_image[None, ...])
+            elif args.loss_config == "ssim+hsv":
+                loss = 0.8 * (1.0 - ssim(image, gt_image)) + 0.2 * \
+                       hsv_color_space_loss(image[None, ...], gt_image[None, ...],
+                                            channel_weight=[0.3, 1, 0])
+            elif args.loss_config == "hsv":
+                loss = hsv_color_space_loss(image[None, ...], gt_image[None, ...],
+                                            channel_weight=[0.3, 1, 0])
             else:
                 raise NotImplementedError(args.loss_config)
         else:
@@ -225,7 +231,7 @@ def training(
             if iteration % opt.opacity_reset_interval == 0 or (
                     dataset.white_background and iteration == opt.densify_from_iter
             ):
-                logger.trace(f"calling reset_opacity at iteration {iteration}")
+                logger.trace("calling reset_opacity")
                 gaussians.reset_opacity()
         else:
             # after having densified the pcd, we should prune the invisibile 3d gaussians.
@@ -267,7 +273,8 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default=None)
     jizong_parser = parser.add_argument_group("jizong_test")
-    jizong_parser.add_argument("--loss-config", choices=["naive", "ssim", "l1", "l2", "tv", "ssim_21", "ssim_5"],
+    jizong_parser.add_argument("--loss-config",
+                               choices=["naive", "ssim", "l1", "l2", "tv", "ssim_21", "ssim_5", "ssim+hsv", "hsv"],
                                type=str,
                                help="jizong's loss configuration")
     jizong_parser.add_argument("--ent-weight", type=float, default=0.0, help="entropy on opacity")

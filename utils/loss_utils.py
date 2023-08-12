@@ -9,8 +9,10 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
+import kornia
 import torch
 import torch.nn.functional as F
+import typing as t
 from math import exp
 from torch import Tensor, nn
 from torch.autograd import Variable
@@ -124,3 +126,13 @@ class Entropy(nn.Module):
             return e.sum()
         else:
             return e
+
+
+def hsv_color_space_loss(rgb_img1: Tensor, rg2_img2: Tensor, *, channel_weight: t.Tuple[float, float, float],
+                         criterion=l1_loss):
+    b, c, h, w = rgb_img1.shape
+    assert rg2_img2.shape == rgb_img1.shape
+    hsv1, hsv2 = kornia.color.rgb_to_hsv(rgb_img1), kornia.color.rgb_to_hsv(rg2_img2)
+    weight = torch.zeros(1, 3, 1, 1, device=torch.device("cuda"), dtype=torch.float)
+    weight[0, :, 0, 0] = torch.Tensor(channel_weight).cuda().type(torch.float)
+    return (torch.abs(hsv1 - hsv2) * weight).mean()
