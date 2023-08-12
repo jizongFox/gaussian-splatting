@@ -9,16 +9,15 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 import json
+import numpy as np
 import os
 import sys
-from dataclasses import dataclass
-from pathlib import Path
-from typing import NamedTuple
-
-import numpy as np
 from PIL import Image
+from dataclasses import dataclass
 from loguru import logger
+from pathlib import Path
 from plyfile import PlyData, PlyElement
+from typing import NamedTuple
 
 from scene.colmap_loader import (
     read_extrinsics_text,
@@ -222,6 +221,8 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
             xyz, rgb, _ = read_points3D_binary(bin_path)
         else:
             xyz, rgb, _ = read_points3D_text(txt_path)
+        mask = np.linalg.norm(xyz, axis=-1) <= 50
+        xyz, rgb = xyz[mask], rgb[mask]
         storePly(ply_path, xyz, rgb)
     try:
         pcd = fetchPly(ply_path)

@@ -12,6 +12,7 @@
 from os import makedirs, path
 
 import os
+import subprocess as sp
 from errno import EEXIST
 
 
@@ -29,3 +30,10 @@ def mkdir_p(folder_path):
 def searchForMaxIteration(folder):
     saved_iters = [int(fname.split("_")[-1]) for fname in os.listdir(folder)]
     return max(saved_iters)
+
+
+def get_gpu_memory():
+    command = "nvidia-smi --query-gpu=memory.free --format=csv"
+    memory_free_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
+    memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
+    return memory_free_values[0]

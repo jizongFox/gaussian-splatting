@@ -10,11 +10,10 @@
 #
 import random
 import sys
-from argparse import ArgumentParser
-from random import randint
-
 import torch
+from argparse import ArgumentParser
 from loguru import logger
+from random import randint
 from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams, OptimizationParams
@@ -22,6 +21,7 @@ from gaussian_renderer import render, network_gui
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
 from utils.loss_utils import l1_loss, ssim, l2_loss, tv_loss, Entropy
+from utils.system_utils import get_gpu_memory
 from utils.train_utils import training_report, prepare_output_and_logger
 
 TENSORBOARD_FOUND = True
@@ -208,6 +208,7 @@ def training(
             if (
                     iteration > opt.densify_from_iter
                     and iteration % opt.densification_interval == 0
+                    and int(get_gpu_memory()) > 500
             ):
                 size_threshold = (
                     12 if iteration > opt.opacity_reset_interval else None
@@ -225,13 +226,13 @@ def training(
             ):
                 logger.trace("calling reset_opacity")
                 gaussians.reset_opacity()
-        elif iteration == opt.densify_until_iter:
-            logger.info("do not densify points.")
-        # else:
-        #     # after having densified the pcd, we should prune the invisibile 3d gaussians.
-        #     if iteration % 2000 == 0:
-        #         opacity_mask = gaussians.opacity[visibility_filter] <= 0.005
-        #         gaussians.prune_points(opacity_mask)
+        else:
+            # after having densified the pcd, we should prune the invisibile 3d gaussians.
+            if iteration % 2000 == 0 and args.prune_after_densification:
+                opacity_mask = gaussians.opacity <= 0.005
+                opacity_mask = torch.logical_and(opacity_mask.squeeze(-1), visibility_filter)
+                logger.trace(f"pruned {opacity_mask.sum()} points")
+                gaussians.prune_points(opacity_mask)
 
         # Optimizer step
         gaussians.optimizer.step()
@@ -256,10 +257,10 @@ if __name__ == "__main__":
     parser.add_argument("--debug_from", type=int, default=-1)
     parser.add_argument("--detect_anomaly", action="store_true", default=False)
     parser.add_argument(
-        "--test_iterations", nargs="+", type=int, default=[5000, 7_000, 10_000, 12_500, 15_000, ]
+        "--test_iterations", nargs="+", type=int, default=[5000, 7_000, 10000, 12_500, 15_000, ]
     )
     parser.add_argument(
-        "--save_iterations", nargs="+", type=int, default=[5000, 7_000, 10_000, 12_500, 15_000, ]
+        "--save_iterations", nargs="+", type=int, default=[5000, 7_000, 10000, 12_500, 15_000, ]
     )
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
@@ -270,6 +271,9 @@ if __name__ == "__main__":
                                help="jizong's loss configuration")
     jizong_parser.add_argument("--ent-weight", type=float, default=0.0, help="entropy on opacity")
     jizong_parser.add_argument("--pcd-path", type=str, default=None, help="load pcd file")
+    jizong_parser.add_argument("--prune-after-densification", default=False, action="store_true",
+                               help="prune after densification")
+
 
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
