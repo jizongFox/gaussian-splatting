@@ -90,11 +90,11 @@ class OptimizationParams(ParamGroup):
         self.rotation_lr = 0.001
         self.percent_dense = 0.01  # this is to reduce the size of the eclipse
         self.lambda_dssim = 0.2
-        self.densification_interval = 100
+        self.densification_interval = 200
         self.opacity_reset_interval = 2500
         self.densify_from_iter = 300
         self.densify_until_iter = 10_000
-        self.densify_grad_threshold = 0.0001  # this is to split more
+        self.densify_grad_threshold = 0.0002  # this is to split more
         super().__init__(parser, "Optimization Parameters")
 
 

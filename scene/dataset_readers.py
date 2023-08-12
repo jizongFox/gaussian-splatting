@@ -9,15 +9,16 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 import json
-import numpy as np
 import os
 import sys
-from PIL import Image
 from dataclasses import dataclass
-from loguru import logger
 from pathlib import Path
-from plyfile import PlyData, PlyElement
 from typing import NamedTuple
+
+import numpy as np
+from PIL import Image
+from loguru import logger
+from plyfile import PlyData, PlyElement
 
 from scene.colmap_loader import (
     read_extrinsics_text,
@@ -198,7 +199,7 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
     )
     cam_infos = sorted(cam_infos_unsorted.copy(), key=lambda x: x.image_name)
     if os.environ.get("DEBUG", "0") == "1":
-        cam_infos = cam_infos[::2]
+        cam_infos = cam_infos[::4]
 
     if eval:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]

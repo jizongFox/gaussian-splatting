@@ -58,7 +58,7 @@ def training(
 
     viewpoint_stack = None
     ema_loss_for_log = 0.0
-    progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
+    progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress", dynamic_ncols=True)
     first_iter += 1
 
     ent_criterion = Entropy()
@@ -249,10 +249,10 @@ if __name__ == "__main__":
     parser.add_argument("--debug_from", type=int, default=-1)
     parser.add_argument("--detect_anomaly", action="store_true", default=False)
     parser.add_argument(
-        "--test_iterations", nargs="+", type=int, default=[2_000, 3_000, 7_000, 15_000, ]
+        "--test_iterations", nargs="+", type=int, default=[5000, 7_000, 15_000, ]
     )
     parser.add_argument(
-        "--save_iterations", nargs="+", type=int, default=[2_000, 3_000, 7_000, 15_000, ]
+        "--save_iterations", nargs="+", type=int, default=[5000, 7_000, 15_000, ]
     )
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
