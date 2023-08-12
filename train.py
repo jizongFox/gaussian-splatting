@@ -10,10 +10,11 @@
 #
 import random
 import sys
-import torch
 from argparse import ArgumentParser
-from loguru import logger
 from random import randint
+
+import torch
+from loguru import logger
 from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams, OptimizationParams
@@ -119,17 +120,17 @@ def training(
 
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
-        Ll1 = l1_loss(image, gt_image)
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
-                1.0 - ssim(image, gt_image)
-        )
+
 
         # jizong test
         if args.loss_config is not None:
             if args.loss_config == "naive":
-                pass
+                Ll1 = l1_loss(image, gt_image)
+                loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
+                        1.0 - ssim(image, gt_image)
+                )
             elif args.loss_config == "l1":
-                loss = Ll1
+                loss = l1_loss(image, gt_image)
             elif args.loss_config == "l2":
                 loss = l2_loss(image, gt_image)
             elif args.loss_config == "ssim":
@@ -138,6 +139,11 @@ def training(
                 loss = tv_loss(image[None, ...], gt_image[None, ...])
             else:
                 raise NotImplementedError(args.loss_config)
+        else:
+            Ll1 = l1_loss(image, gt_image)
+            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
+                    1.0 - ssim(image, gt_image)
+            )
 
         loss = loss
         loss.backward()
