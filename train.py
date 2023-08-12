@@ -223,6 +223,11 @@ def training(
             ):
                 logger.trace("calling reset_opacity")
                 gaussians.reset_opacity()
+        else:
+            # after having densified the pcd, we should prune the invisibile 3d gaussians.
+            if iteration % 2000 == 0:
+                opacity_mask = gaussians.opacity[visibility_filter] <= 0.005
+                gaussians.prune_points(opacity_mask)
 
         # Optimizer step
         gaussians.optimizer.step()
