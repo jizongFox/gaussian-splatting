@@ -8,6 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+import os
 import random
 import sys
 import torch
@@ -21,7 +22,7 @@ from gaussian_renderer import render, network_gui
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
 from utils.loss_utils import l1_loss, ssim, l2_loss, tv_loss, Entropy
-from utils.system_utils import get_gpu_memory
+from utils.system_utils import get_gpu_memory, get_hash
 from utils.train_utils import training_report, prepare_output_and_logger
 
 TENSORBOARD_FOUND = True
@@ -283,8 +284,13 @@ if __name__ == "__main__":
     jizong_parser.add_argument("--pcd-path", type=str, default=None, help="load pcd file")
     jizong_parser.add_argument("--prune-after-densification", default=False, action="store_true",
                                help="prune after densification")
+    jizong_parser.add_argument("--no-hash", default=False, action="store_true")
 
     args = parser.parse_args(sys.argv[1:])
+    _hash = get_hash()
+    if not args.no_hash:
+        args.model_path = os.path.join(args.model_path, "git_" + _hash)
+
     args.save_iterations.append(args.iterations)
 
     print("Optimizing " + args.model_path)

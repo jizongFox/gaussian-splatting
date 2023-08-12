@@ -8,7 +8,6 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-
 from os import makedirs, path
 
 import os
@@ -37,3 +36,7 @@ def get_gpu_memory():
     memory_free_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
     memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
     return memory_free_values[0]
+
+
+def get_hash() -> str:
+    return sp.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
