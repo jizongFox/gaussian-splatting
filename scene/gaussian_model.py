@@ -8,10 +8,11 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-import numpy as np
 import os
-import torch
 import typing as t
+
+import numpy as np
+import torch
 from loguru import logger
 from plyfile import PlyData, PlyElement
 from simple_knn._C import distCUDA2
@@ -613,3 +614,6 @@ class GaussianModel:
             viewspace_point_tensor.grad[update_filter, :2], dim=-1, keepdim=True
         )
         self.denom[update_filter] += 1
+
+    def __len__(self) -> int:
+        return len(self.xyz)

@@ -10,10 +10,11 @@
 #
 import random
 import sys
-import torch
 from argparse import ArgumentParser
-from loguru import logger
 from random import randint
+
+import torch
+from loguru import logger
 from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams, OptimizationParams
@@ -163,6 +164,7 @@ def training(
             loss = loss + ent_loss * args.ent_weight
 
         tb_writer.add_scalar("train/entropy", ent_loss.item(), iteration)
+        tb_writer.add_scalar("train/pcd_size", len(gaussians), iteration)
 
         loss.backward()
 
