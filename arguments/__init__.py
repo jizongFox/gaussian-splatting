@@ -93,7 +93,7 @@ class OptimizationParams(ParamGroup):
         self.densification_interval = 200
         self.opacity_reset_interval = 2500
         self.densify_from_iter = 500
-        self.densify_until_iter = 100_000
+        self.densify_until_iter = 10_000
         self.densify_grad_threshold = 0.000175  # this is to split more
         super().__init__(parser, "Optimization Parameters")
 
