@@ -10,11 +10,10 @@
 #
 import random
 import sys
-from argparse import ArgumentParser
-from random import randint
-
 import torch
+from argparse import ArgumentParser
 from loguru import logger
+from random import randint
 from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams, OptimizationParams
@@ -121,26 +120,29 @@ def training(
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
 
+        Ll1 = l1_loss(image, gt_image)
 
         # jizong test
         if args.loss_config is not None:
             if args.loss_config == "naive":
-                Ll1 = l1_loss(image, gt_image)
                 loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
                         1.0 - ssim(image, gt_image)
                 )
             elif args.loss_config == "l1":
-                loss = l1_loss(image, gt_image)
+                loss = Ll1
             elif args.loss_config == "l2":
                 loss = l2_loss(image, gt_image)
             elif args.loss_config == "ssim":
                 loss = 1.0 - ssim(image, gt_image)
+            elif args.loss_config == "ssim_21":
+                loss = 1.0 - ssim(image, gt_image, window_size=21)
+            elif args.loss_config == "ssim_5":
+                loss = 1.0 - ssim(image, gt_image, window_size=5)
             elif args.loss_config == "tv":
                 loss = tv_loss(image[None, ...], gt_image[None, ...])
             else:
                 raise NotImplementedError(args.loss_config)
         else:
-            Ll1 = l1_loss(image, gt_image)
             loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
                     1.0 - ssim(image, gt_image)
             )
@@ -206,6 +208,10 @@ def training(
                 logger.trace("calling reset_opacity")
                 gaussians.reset_opacity()
 
+        # else: entropy minimization
+        else:
+            opacity = gaussians.opacity
+
         # Optimizer step
         gaussians.optimizer.step()
         gaussians.optimizer.zero_grad(set_to_none=True)
@@ -238,7 +244,8 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default=None)
     jizong_parser = parser.add_argument_group("jizong_test")
-    jizong_parser.add_argument("--loss-config", choices=["naive", "ssim", "l1", "l2", "tv"], type=str,
+    jizong_parser.add_argument("--loss-config", choices=["naive", "ssim", "l1", "l2", "tv", "ssim_21", "ssim_5"],
+                               type=str,
                                help="jizong's loss configuration")
     jizong_parser.add_argument("--pcd-path", type=str, default=None, help="load pcd file")
 

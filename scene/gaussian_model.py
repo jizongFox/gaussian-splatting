@@ -12,6 +12,7 @@ import numpy as np
 import os
 import torch
 import typing as t
+from loguru import logger
 from plyfile import PlyData, PlyElement
 from simple_knn._C import distCUDA2
 from torch import nn, Tensor
@@ -139,6 +140,7 @@ class GaussianModel:
     def oneupSHdegree(self):
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
+            logger.debug(f"Active sh_degree: {self.active_sh_degree}")
 
     def create_from_pcd(self, pcd: BasicPointCloud, spatial_lr_scale: float):
         self.spatial_lr_scale = spatial_lr_scale
