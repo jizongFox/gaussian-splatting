@@ -33,6 +33,11 @@ from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 from utils.sh_utils import SH2RGB
 
 
+def _read_image(filename):
+    with Image.open(filename) as f:
+        return f
+
+
 class CameraInfo(NamedTuple):
     uid: int
     R: np.ndarray
@@ -116,7 +121,7 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
 
         image_path = os.path.join(images_folder, os.path.basename(extr.name))
         image_name = os.path.basename(image_path).split(".")[0]
-        image = Image.open(image_path)
+        image = _read_image(image_path)
 
         cam_info = CameraInfo(
             uid=uid,
@@ -250,7 +255,7 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
 
             image_path = os.path.join(path, cam_name)
             image_name = Path(cam_name).stem
-            image = Image.open(image_path)
+            image = _read_image(image_path)
 
             im_data = np.array(image.convert("RGBA"))
 

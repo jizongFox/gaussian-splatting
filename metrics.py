@@ -21,13 +21,18 @@ from tqdm import tqdm
 from lpipsPyTorch import lpips
 
 
+def _read_image(filename):
+    with Image.open(filename) as f:
+        return f
+
+
 def readImages(renders_dir, gt_dir):
     renders = []
     gts = []
     image_names = []
     for fname in os.listdir(renders_dir):
-        render = Image.open(renders_dir / fname)
-        gt = Image.open(gt_dir / fname)
+        render = _read_image(renders_dir / fname)
+        gt = _read_image(gt_dir / fname)
         renders.append(tf.to_tensor(render).unsqueeze(0)[:, :3, :, :].cuda())
         gts.append(tf.to_tensor(gt).unsqueeze(0)[:, :3, :, :].cuda())
         image_names.append(fname)
