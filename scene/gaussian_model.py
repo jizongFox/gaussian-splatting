@@ -22,7 +22,7 @@ from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotati
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 from utils.graphics_utils import BasicPointCloud
 from utils.sh_utils import RGB2SH
-from utils.system_utils import mkdir_p
+from utils.system_utils import mkdir_p, get_gpu_memory
 
 
 def setup_functions(self):
@@ -575,10 +575,11 @@ class GaussianModel:
     def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size, opacity_percentage: float = None):
         grads = self.xyz_gradient_accum / self.denom
         grads[grads.isnan()] = 0.0
-
-        self.densify_and_clone(grads, max_grad, extent)
-        self.densify_and_split(grads, max_grad, extent)
-
+        if int(get_gpu_memory()) > 250:
+            self.densify_and_clone(grads, max_grad, extent)
+            self.densify_and_split(grads, max_grad, extent)
+        else:
+            logger.trace("memory issue only perform prunning")
         prune_mask = (self.opacity < min_opacity).squeeze()
         if max_screen_size:
             big_points_vs: Tensor = self.max_radii2D > max_screen_size  # noqa

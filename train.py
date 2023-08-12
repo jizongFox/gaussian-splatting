@@ -11,10 +11,11 @@
 import os
 import random
 import sys
-import torch
 from argparse import ArgumentParser
-from loguru import logger
 from random import randint
+
+import torch
+from loguru import logger
 from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams, OptimizationParams
@@ -22,7 +23,7 @@ from gaussian_renderer import render, network_gui
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
 from utils.loss_utils import l1_loss, ssim, l2_loss, tv_loss, Entropy
-from utils.system_utils import get_gpu_memory, get_hash
+from utils.system_utils import get_hash
 from utils.train_utils import training_report, prepare_output_and_logger
 
 TENSORBOARD_FOUND = True
@@ -130,7 +131,7 @@ def training(
         if args.loss_config is not None:
             if args.loss_config == "naive":
                 loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
-                        1.0 - ssim(image, gt_image)
+                    1.0 - ssim(image, gt_image)
                 )
             elif args.loss_config == "l1":
                 loss = Ll1
@@ -212,37 +213,26 @@ def training(
             if (
                     iteration > opt.densify_from_iter
                     and iteration % opt.densification_interval == 0
-                    and int(get_gpu_memory()) > 250
             ):
-                logger.trace("calling densify_and_prune")
+                logger.trace(f"calling densify_and_prune at iteration {iteration}")
                 gaussians.densify_and_prune(
                     opt.densify_grad_threshold,
                     0.005,
                     scene.cameras_extent,
                     size_threshold,
                 )
-            if int(get_gpu_memory()) < 250:
-                # that means the previous block does not happen
-                prune_mask = (gaussians.opacity < 0.005).squeeze()
-                if size_threshold:
-                    big_points_vs: Tensor = self.max_radii2D > max_screen_size  # noqa
-                    big_points_ws = gaussians.scaling.max(dim=1).values > 0.1 * scene.cameras_extent
-                    prune_mask = torch.logical_or(
-                        torch.logical_or(prune_mask, big_points_vs), big_points_ws
-                    )
-                gaussians.prune_points(prune_mask)
 
             if iteration % opt.opacity_reset_interval == 0 or (
                     dataset.white_background and iteration == opt.densify_from_iter
             ):
-                logger.trace("calling reset_opacity")
+                logger.trace(f"calling reset_opacity at iteration {iteration}")
                 gaussians.reset_opacity()
         else:
             # after having densified the pcd, we should prune the invisibile 3d gaussians.
             if iteration % 2000 == 0 and args.prune_after_densification:
                 opacity_mask = gaussians.opacity <= 0.005
                 opacity_mask = torch.logical_and(opacity_mask.squeeze(-1), visibility_filter)
-                logger.trace(f"pruned {opacity_mask.sum()} points")
+                logger.trace(f"pruned {opacity_mask.sum()} points at iteration {iteration}")
                 gaussians.prune_points(opacity_mask)
 
         # Optimizer step
