@@ -20,7 +20,7 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 from gaussian_renderer import render, network_gui
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, ssim, l2_loss, tv_loss
+from utils.loss_utils import l1_loss, ssim, l2_loss, tv_loss, Entropy
 from utils.train_utils import training_report, prepare_output_and_logger
 
 TENSORBOARD_FOUND = True
@@ -59,6 +59,8 @@ def training(
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
+
+    ent_criterion = Entropy()
     for iteration in range(first_iter, opt.iterations + 1):
         if network_gui.conn == None:
             network_gui.try_connect()
@@ -148,6 +150,20 @@ def training(
             )
 
         loss = loss
+
+        # else: entropy minimization
+        with torch.set_grad_enabled(iteration > opt.densify_until_iter):
+            opacity = gaussians.opacity[visibility_filter]
+            opacity_dist = torch.cat([opacity, 1 - opacity], dim=1)
+            assert opacity_dist.shape[1] == 2, opacity_dist.shape
+
+            ent_loss = ent_criterion(opacity_dist)
+
+        if iteration > opt.densify_until_iter:
+            loss = loss + ent_loss * args.ent_weight
+
+        tb_writer.add_scalar("train/entropy", ent_loss.item(), iteration)
+
         loss.backward()
 
         iter_end.record()
@@ -208,10 +224,6 @@ def training(
                 logger.trace("calling reset_opacity")
                 gaussians.reset_opacity()
 
-        # else: entropy minimization
-        else:
-            opacity = gaussians.opacity
-
         # Optimizer step
         gaussians.optimizer.step()
         gaussians.optimizer.zero_grad(set_to_none=True)
@@ -247,6 +259,7 @@ if __name__ == "__main__":
     jizong_parser.add_argument("--loss-config", choices=["naive", "ssim", "l1", "l2", "tv", "ssim_21", "ssim_5"],
                                type=str,
                                help="jizong's loss configuration")
+    jizong_parser.add_argument("--ent-weight", type=float, default=0.0, help="entropy on opacity")
     jizong_parser.add_argument("--pcd-path", type=str, default=None, help="load pcd file")
 
     args = parser.parse_args(sys.argv[1:])

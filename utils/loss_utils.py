@@ -12,6 +12,7 @@
 import torch
 import torch.nn.functional as F
 from math import exp
+from torch import Tensor, nn
 from torch.autograd import Variable
 
 
@@ -93,3 +94,33 @@ def tv_loss(img1, img2):
     tv_w_2 = (img2[:, :, :, 1:] - img2[:, :, :, :-1])
 
     return (tv_h_1 - tv_h_2).pow(2).sum(dim=0).mean() + (tv_w_1 - tv_w_2).pow(2).sum(dim=0).mean()
+
+
+class Entropy(nn.Module):
+    r"""General Entropy interface
+
+    the definition of Entropy is - \sum p(xi) log (p(xi))
+
+    reduction (string, optional): Specifies the reduction to apply to the output:
+    ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+    ``'mean'``: the sum of the output will be divided by the number of
+    elements in the output, ``'sum'``: the output will be summed.
+    """
+
+    def __init__(self, reduction="mean", eps=1e-16):
+        super().__init__()
+        self._eps = eps
+        self._reduction = reduction
+
+    def forward(self, input_: Tensor) -> Tensor:
+        assert input_.shape.__len__() >= 2
+        b, _, *s = input_.shape
+        e = input_ * (input_ + self._eps).log()
+        e = -1.0 * e.sum(1)
+        assert e.shape == torch.Size([b, *s])
+        if self._reduction == "mean":
+            return e.mean()
+        elif self._reduction == "sum":
+            return e.sum()
+        else:
+            return e
