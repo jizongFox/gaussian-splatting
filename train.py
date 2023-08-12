@@ -20,7 +20,7 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 from gaussian_renderer import render, network_gui
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, ssim, l2_loss
+from utils.loss_utils import l1_loss, ssim, l2_loss, tv_loss
 from utils.train_utils import training_report, prepare_output_and_logger
 
 TENSORBOARD_FOUND = True
@@ -49,7 +49,7 @@ def training(
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
 
-    bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
+    bg_color = [1, 1, 1]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
     iter_start = torch.cuda.Event(enable_timing=True)
@@ -135,7 +135,7 @@ def training(
             elif args.loss_config == "ssim":
                 loss = 1.0 - ssim(image, gt_image)
             elif args.loss_config == "tv":
-                raise NotImplementedError(args.loss_config)
+                loss = tv_loss(image[None, ...], gt_image[None, ...])
             else:
                 raise NotImplementedError(args.loss_config)
 

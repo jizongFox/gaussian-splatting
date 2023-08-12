@@ -83,3 +83,13 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
         return ssim_map.mean()
     else:
         return ssim_map.mean(1).mean(1).mean(1)
+
+
+def tv_loss(img1, img2):
+    tv_h_1 = (img1[:, :, 1:, :] - img1[:, :, :-1, :])
+    tv_w_1 = (img1[:, :, :, 1:] - img1[:, :, :, :-1])
+
+    tv_h_2 = (img2[:, :, 1:, :] - img2[:, :, :-1, :])
+    tv_w_2 = (img2[:, :, :, 1:] - img2[:, :, :, :-1])
+
+    return (tv_h_1 - tv_h_2).pow(2).sum(dim=0).mean() + (tv_w_1 - tv_w_2).pow(2).sum(dim=0).mean()
