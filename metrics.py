@@ -23,7 +23,7 @@ from lpipsPyTorch import lpips
 
 def _read_image(filename):
     with Image.open(filename) as f:
-        return f
+        return f.copy()
 
 
 def readImages(renders_dir, gt_dir):

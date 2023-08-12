@@ -35,7 +35,7 @@ from utils.sh_utils import SH2RGB
 
 def _read_image(filename):
     with Image.open(filename) as f:
-        return f
+        return f.copy()
 
 
 class CameraInfo(NamedTuple):
