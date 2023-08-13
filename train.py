@@ -22,7 +22,7 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 from gaussian_renderer import render, network_gui
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, ssim, l2_loss, tv_loss, Entropy, hsv_color_space_loss
+from utils.loss_utils import l1_loss, ssim, l2_loss, tv_loss, Entropy, hsv_color_space_loss, yiq_color_space_loss
 from utils.system_utils import get_hash
 from utils.train_utils import training_report, prepare_output_and_logger
 
@@ -147,11 +147,23 @@ def training(
                 loss = tv_loss(image[None, ...], gt_image[None, ...])
             elif args.loss_config == "ssim+hsv":
                 loss = 0.8 * (1.0 - ssim(image, gt_image)) + 0.2 * \
-                       hsv_color_space_loss(image[None, ...], gt_image[None, ...],
-                                            channel_weight=[0.3, 1, 0])
+                       hsv_color_space_loss(image[None, ...], gt_image[None, ...], channel_weight=(0.5, 1, 0.1))
             elif args.loss_config == "hsv":
-                loss = hsv_color_space_loss(image[None, ...], gt_image[None, ...],
-                                            channel_weight=[0.3, 1, 0])
+                loss = hsv_color_space_loss(image[None, ...], gt_image[None, ...], channel_weight=(0.5, 1, 0.1))
+
+            elif args.loss_config == "yiq":
+                loss = yiq_color_space_loss(image[None, ...], gt_image[None, ...], channel_weight=(0.1, 1, 1))
+
+            elif args.loss_config == "ssim+yiq":
+                loss = 0.8 * (1.0 - ssim(image, gt_image)) + 0.2 * yiq_color_space_loss(image[None, ...],
+                                                                                        gt_image[None, ...],
+                                                                                        channel_weight=(0.1, 1, 1))
+
+            elif args.loss_config == "ssim+yiq+":
+                loss = 0.25 * (1.0 - ssim(image, gt_image)) + 0.75 * yiq_color_space_loss(image[None, ...],
+                                                                                          gt_image[None, ...],
+                                                                                          channel_weight=(
+                                                                                          0.01, 1, 0.35))
             else:
                 raise NotImplementedError(args.loss_config)
         else:
@@ -274,7 +286,8 @@ if __name__ == "__main__":
     parser.add_argument("--start_checkpoint", type=str, default=None)
     jizong_parser = parser.add_argument_group("jizong_test")
     jizong_parser.add_argument("--loss-config",
-                               choices=["naive", "ssim", "l1", "l2", "tv", "ssim_21", "ssim_5", "ssim+hsv", "hsv"],
+                               choices=["naive", "ssim", "l1", "l2", "tv", "ssim_21", "ssim_5", "ssim+hsv", "hsv",
+                                        "yiq", "ssim+yiq", "ssim+yiq+"],
                                type=str,
                                help="jizong's loss configuration")
     jizong_parser.add_argument("--ent-weight", type=float, default=0.0, help="entropy on opacity")
