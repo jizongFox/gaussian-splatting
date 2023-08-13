@@ -11,10 +11,11 @@
 import os
 import random
 import sys
-import torch
 from argparse import ArgumentParser
-from loguru import logger
 from random import randint
+
+import torch
+from loguru import logger
 from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams, OptimizationParams
@@ -235,11 +236,10 @@ def training(
                 gaussians.reset_opacity()
         else:
             # after having densified the pcd, we should prune the invisibile 3d gaussians.
-            if iteration % 2000 == 0 and args.prune_after_densification:
+            if iteration % 500 == 0 and args.prune_after_densification:
                 opacity_mask = gaussians.opacity <= 0.005
-                opacity_mask = torch.logical_and(opacity_mask.squeeze(-1), visibility_filter)
                 logger.trace(f"pruned {opacity_mask.sum()} points at iteration {iteration}")
-                gaussians.prune_points(opacity_mask)
+                gaussians.prune_points(opacity_mask.squeeze(-1))
 
         # Optimizer step
         gaussians.optimizer.step()
