@@ -8,6 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+from __future__ import annotations
 
 import kornia
 import torch
@@ -128,11 +129,45 @@ class Entropy(nn.Module):
             return e
 
 
-def hsv_color_space_loss(rgb_img1: Tensor, rg2_img2: Tensor, *, channel_weight: t.Tuple[float, float, float],
+def hsv_color_space_loss(rgb_img1: Tensor, rg2_img2: Tensor, *,
+                         channel_weight: t.Tuple[float | int, float | int, float | int],
                          criterion=l1_loss):
     b, c, h, w = rgb_img1.shape
     assert rg2_img2.shape == rgb_img1.shape
     hsv1, hsv2 = kornia.color.rgb_to_hsv(rgb_img1), kornia.color.rgb_to_hsv(rg2_img2)
+    weight = torch.zeros(1, 3, 1, 1, device=torch.device("cuda"), dtype=torch.float)
+    weight[0, :, 0, 0] = torch.Tensor(channel_weight).cuda().type(torch.float)
+    return (torch.abs(hsv1 - hsv2) * weight).mean()
+
+
+def _rgb_to_yiq(rgb_img):
+    """
+    Convert RGB image to YIQ.
+    Assumes rgb_img is a PyTorch tensor of shape (batch_size, 3, height, width) and in [0, 1].
+    """
+    # Define the conversion matrix
+    transformation_matrix = torch.tensor([
+        [0.299, 0.587, 0.114],
+        [0.596, -0.274, -0.322],
+        [0.211, -0.523, 0.312]
+    ]).to(rgb_img.device)
+
+    # Reshape the image tensor and perform matrix multiplication
+    batch_size, channels, height, width = rgb_img.shape
+    reshaped_img = rgb_img.view(batch_size, channels, -1)  # Shape: (batch_size, 3, height*width)
+    yiq_img = torch.matmul(transformation_matrix, reshaped_img)
+
+    # Reshape the output back to the original shape
+    yiq_img = yiq_img.view(batch_size, channels, height, width)
+    return yiq_img
+
+
+def yiq_color_space_loss(rgb_img1: Tensor, rg2_img2: Tensor, *,
+                         channel_weight: t.Tuple[float | int, float | int, float | int],
+                         criterion=l1_loss):
+    b, c, h, w = rgb_img1.shape
+    assert rg2_img2.shape == rgb_img1.shape
+    hsv1, hsv2 = _rgb_to_yiq(rgb_img1), _rgb_to_yiq(rg2_img2)
     weight = torch.zeros(1, 3, 1, 1, device=torch.device("cuda"), dtype=torch.float)
     weight[0, :, 0, 0] = torch.Tensor(channel_weight).cuda().type(torch.float)
     return (torch.abs(hsv1 - hsv2) * weight).mean()
