@@ -8,11 +8,10 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-import os
-import typing as t
-
 import numpy as np
+import os
 import torch
+import typing as t
 from loguru import logger
 from plyfile import PlyData, PlyElement
 from simple_knn._C import distCUDA2
@@ -141,7 +140,7 @@ class GaussianModel:
     def oneupSHdegree(self):
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
-            logger.debug(f"Active sh_degree: {self.active_sh_degree}")
+            logger.trace(f"Active sh_degree: {self.active_sh_degree}")
 
     def create_from_pcd(self, pcd: BasicPointCloud, spatial_lr_scale: float):
         self.spatial_lr_scale = spatial_lr_scale
@@ -579,7 +578,7 @@ class GaussianModel:
             self.densify_and_clone(grads, max_grad, extent)
             self.densify_and_split(grads, max_grad, extent)
         else:
-            logger.trace("memory issue only perform prunning")
+            logger.warning("memory issue only perform prunning")
         prune_mask = (self.opacity < min_opacity).squeeze()
         if max_screen_size:
             big_points_vs: Tensor = self.max_radii2D > max_screen_size  # noqa
