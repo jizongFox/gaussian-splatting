@@ -11,11 +11,10 @@
 import os
 import random
 import sys
-from argparse import ArgumentParser
-from random import randint
-
 import torch
+from argparse import ArgumentParser
 from loguru import logger
+from random import randint
 from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams, OptimizationParams
@@ -164,6 +163,11 @@ def training(
                                                                                           gt_image[None, ...],
                                                                                           channel_weight=(
                                                                                           0.01, 1, 0.35))
+            elif args.loss_config == "ssim-mres+yiq+":
+                loss = 0.2 * (1.0 - ssim(image, gt_image, window_size=11)) + \
+                       0.2 * (1.0 - ssim(image, gt_image, window_size=5)) + \
+                       0.2 * (1.0 - ssim(image, gt_image, window_size=21)) + \
+                       0.4 * yiq_color_space_loss(image[None, ...], gt_image[None, ...], channel_weight=(0.01, 1, 0.35))
             else:
                 raise NotImplementedError(args.loss_config)
         else:
@@ -287,7 +291,7 @@ if __name__ == "__main__":
     jizong_parser = parser.add_argument_group("jizong_test")
     jizong_parser.add_argument("--loss-config",
                                choices=["naive", "ssim", "l1", "l2", "tv", "ssim_21", "ssim_5", "ssim+hsv", "hsv",
-                                        "yiq", "ssim+yiq", "ssim+yiq+"],
+                                        "yiq", "ssim+yiq", "ssim+yiq+", "ssim-mres+yiq+"],
                                type=str,
                                help="jizong's loss configuration")
     jizong_parser.add_argument("--ent-weight", type=float, default=0.0, help="entropy on opacity")

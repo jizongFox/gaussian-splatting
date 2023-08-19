@@ -13,6 +13,7 @@ import numpy as np
 import os
 import sys
 from PIL import Image
+from cache_to_disk import cache_to_disk
 from dataclasses import dataclass
 from loguru import logger
 from pathlib import Path
@@ -87,6 +88,7 @@ def getNerfppNorm(cam_info):
     return {"translate": translate, "radius": radius}
 
 
+@cache_to_disk(3)
 def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
     cam_infos = []
     for idx, key in enumerate(cam_extrinsics):

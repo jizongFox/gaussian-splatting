@@ -14,6 +14,7 @@ import kornia
 import torch
 import torch.nn.functional as F
 import typing as t
+from functools import lru_cache
 from math import exp
 from torch import Tensor, nn
 from torch.autograd import Variable
@@ -37,6 +38,7 @@ def gaussian(window_size, sigma):
     return gauss / gauss.sum()
 
 
+@lru_cache()
 def create_window(window_size, channel):
     _1D_window = gaussian(window_size, 1.5).unsqueeze(1)
     _2D_window = _1D_window.mm(_1D_window.t()).float().unsqueeze(0).unsqueeze(0)
