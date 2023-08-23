@@ -12,9 +12,9 @@ from torch import Tensor
 from torch import nn
 from tqdm import tqdm
 
-original_path = "/home/jizong/Workspace/gaussian-splatting/output/0812_with_sparsity_loss/white/baseline/point_cloud/iteration_30000/point_cloud.ply"
-# modified_path = "output/jizong_meetingroom/backup/Peng/point_cloud2/point_cloud2.ply"
-output_path = "/home/jizong/Workspace/gaussian-splatting/output/0812_with_sparsity_loss/white/baseline/point_cloud/iteration_130000/point_cloud.ply"
+original_path = "/home/jizong/Workspace/gaussian-splatting/output/meetingroom_new_check_hsv/ssim+yiq+_entropy_0.001/git_dbac76c/point_cloud/iteration_15000/point_cloud.ply"
+modified_path = "/home/jizong/Workspace/gaussian-splatting/output/meetingroom_new_check_hsv/ssim+yiq+_entropy_0.001/git_dbac76c/point_cloud/iteration_15000/mask.ply"
+output_path = "/home/jizong/Workspace/gaussian-splatting/output/meetingroom_new_check_hsv/ssim+yiq+_entropy_0.001/git_dbac76c/point_cloud/iteration_999999/point_cloud.ply"
 
 torch.set_grad_enabled(False)
 
@@ -189,6 +189,24 @@ class ReadPCD:
             mask[index_] = torch.any(torch.all(cur_item == xyz, dim=-1))
         return mask.detach().cpu().numpy()
 
+    def create_mask_from_modified_ply_py3d(self, path):
+        plydata = PlyData.read(path)
+
+        xyz = np.stack(
+            (
+                np.asarray(plydata.elements[0]["x"]),
+                np.asarray(plydata.elements[0]["y"]),
+                np.asarray(plydata.elements[0]["z"]),
+            ),
+            axis=1,
+        )
+        xyz = torch.from_numpy(xyz).cuda()
+        mask = torch.zeros((self._xyz.shape[0],), dtype=bool)
+        knn_result = p3dops.knn_points(xyz[None, ...], self._xyz[None, ...], K=1)
+        mask[knn_result.idx] = True
+
+        return mask.detach().cpu().numpy()
+
     def change_transparency(self, mask, new_transparency):
 
         with torch.no_grad():
@@ -275,12 +293,12 @@ class ReadPCD:
 
     def offline_change_opacity(self):
         opacity = torch.sigmoid(self._opacity)
-        ranged_opacity = opacity ** 2 * 2 - 1
+        ranged_opacity = opacity * 2 - 1
 
         def odd_pow(input, exponent):
             return input.sign() * input.abs().pow(exponent)
 
-        rescaled_opacity = (odd_pow(ranged_opacity, 1 / 11) + 1) / 2
+        rescaled_opacity = (odd_pow(ranged_opacity, 1 / 3) + 1) / 2
 
         def _inverse_sigmoid(value: Tensor):
             value.clip_(1e-5, 0.9999)
@@ -288,6 +306,21 @@ class ReadPCD:
 
         self._opacity = _inverse_sigmoid(rescaled_opacity)
 
+    def offline_change_scale(self, div: float):
+        scales = torch.exp(self._scaling)
+        new_scales = scales / div
+
+        self._scaling = torch.log(new_scales)
+
+    def remove_rotation(self):
+        batch_size = self._rotation.shape[0]
+        from nerfstudio.process_data.colmap_utils import rotmat2qvec
+
+        new_rots = rotmat2qvec(np.diag(np.ones(3)))
+        new_rots = torch.from_numpy(new_rots).float().cuda().repeat(batch_size, 1)
+        self._rotation = nn.Parameter(
+            torch.tensor(new_rots, dtype=torch.float, device="cuda")
+        )
 
 pcd_manager = ReadPCD(3)
 mask = None
@@ -300,10 +333,13 @@ pcd_manager.load_ply(original_path)
 
 # pcd_manager.plot_3d(downscale_ratio=500)
 # mask =pcd_manager.de
-# mask = pcd_manager.create_mask_from_modified_ply(modified_path)
-# pcd_manager.change_transparency(~mask, new_transparency=0)
-pcd_manager.offline_change_opacity()
-# mask2 = pcd_manager.create_mask_based_on_3d_scale(1, 1000)
-mask = pcd_manager.create_mask_based_on_opacity(0.001)
+mask = pcd_manager.create_mask_from_modified_ply_py3d(modified_path)
+pcd_manager.change_transparency(mask, new_transparency=0)
+# pcd_manager.offline_change_opacity()
+# pcd_manager.offline_change_scale(div=1.1)
+
+# mask2 = pcd_manager.create_mask_based_on_3d_scale(1, 100)
+# mask = pcd_manager.create_mask_based_on_opacity(0.001)
+# pcd_manager.remove_rotation()
 
 pcd_manager.save_ply(output_path, mask)
