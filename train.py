@@ -159,10 +159,10 @@ def training(
                                                                                         channel_weight=(0.1, 1, 1))
 
             elif args.loss_config == "ssim+yiq+":
-                loss = 0.25 * (1.0 - ssim(image, gt_image)) + 0.75 * yiq_color_space_loss(image[None, ...],
+                loss = 0.5 * (1.0 - ssim(image, gt_image)) + 0.5 * yiq_color_space_loss(image[None, ...],
                                                                                           gt_image[None, ...],
                                                                                           channel_weight=(
-                                                                                          0.01, 1, 0.35))
+                                                                                              0.05, 1, 1))
             elif args.loss_config == "ssim-mres+yiq+":
                 loss = 0.2 * (1.0 - ssim(image, gt_image, window_size=11)) + \
                        0.2 * (1.0 - ssim(image, gt_image, window_size=5)) + \
