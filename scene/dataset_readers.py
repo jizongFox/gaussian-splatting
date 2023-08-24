@@ -12,9 +12,11 @@ import json
 import numpy as np
 import os
 import sys
+import torch
 from PIL import Image
 from cache_to_disk import cache_to_disk
 from dataclasses import dataclass
+from functools import lru_cache
 from loguru import logger
 from pathlib import Path
 from plyfile import PlyData, PlyElement
@@ -342,3 +344,8 @@ sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
     "Blender": readNerfSyntheticInfo,
 }
+
+
+@lru_cache()
+def _preload():
+    torch.inverse(torch.randn((2, 2, 2), device="cuda"))

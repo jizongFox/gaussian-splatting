@@ -20,10 +20,13 @@ from tqdm import tqdm
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from gaussian_renderer import render, network_gui
 from scene import Scene, GaussianModel
+from scene.dataset_readers import _preload  # noqa
 from utils.general_utils import safe_state
 from utils.loss_utils import l1_loss, ssim, l2_loss, tv_loss, Entropy, hsv_color_space_loss, yiq_color_space_loss
 from utils.system_utils import get_hash
 from utils.train_utils import training_report, prepare_output_and_logger
+
+_preload()
 
 TENSORBOARD_FOUND = True
 
@@ -160,9 +163,9 @@ def training(
 
             elif args.loss_config == "ssim+yiq+":
                 loss = 0.5 * (1.0 - ssim(image, gt_image)) + 0.5 * yiq_color_space_loss(image[None, ...],
-                                                                                          gt_image[None, ...],
-                                                                                          channel_weight=(
-                                                                                              0.05, 1, 1))
+                                                                                        gt_image[None, ...],
+                                                                                        channel_weight=(
+                                                                                            0.05, 1, 1))
             elif args.loss_config == "ssim-mres+yiq+":
                 loss = 0.2 * (1.0 - ssim(image, gt_image, window_size=11)) + \
                        0.2 * (1.0 - ssim(image, gt_image, window_size=5)) + \
