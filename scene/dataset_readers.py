@@ -16,7 +16,6 @@ import os
 import sys
 import torch
 from PIL import Image
-from cache_to_disk import cache_to_disk
 from dataclasses import dataclass
 from functools import lru_cache
 from loguru import logger
@@ -85,7 +84,6 @@ def getNerfppNorm(cam_info):
     return {"translate": translate, "radius": radius}
 
 
-@cache_to_disk(3)
 def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
     cam_infos = []
     for idx, key in enumerate(cam_extrinsics):
@@ -172,6 +170,7 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
     cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics,
                                            images_folder=os.path.join(path, reading_dir), )
     cam_infos = sorted(cam_infos_unsorted.copy(), key=lambda x: x.image_name)
+
     if os.environ.get("DEBUG", "0") == "1":
         cam_infos = cam_infos[::2]
 
