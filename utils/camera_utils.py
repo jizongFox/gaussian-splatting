@@ -14,6 +14,7 @@ import numpy as np
 import os
 
 from scene.cameras import Camera
+from scene.dataset_readers import _read_image
 from utils.general_utils import PILtoTorch
 from utils.graphics_utils import fov2focal
 
@@ -21,6 +22,9 @@ WARNED = False
 
 
 def loadCam(args, id, cam_info, resolution_scale):
+    if cam_info.image is None:
+        cam_info.image = _read_image(cam_info.image_path)
+
     orig_w, orig_h = cam_info.image.size
 
     if args.resolution in [1, 2, 4, 8]:
