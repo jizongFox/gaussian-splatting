@@ -200,10 +200,17 @@ class ReadPCD:
             ),
             axis=1,
         )
-        xyz = torch.from_numpy(xyz).cuda()
-        mask = torch.zeros((self._xyz.shape[0],), dtype=bool)
+        return self.create_mask_from_xyz(xyz)
+
+    def create_mask_from_xyz(self, xyz: np.ndarray | Tensor):
+        if isinstance(xyz, Tensor):
+            xyz = xyz.cpu().detach().numpy()
+        assert isinstance(xyz, np.ndarray), xyz.__class__.__name__
+
+        xyz = torch.from_numpy(xyz).cuda().float()
+        mask = torch.zeros((self._xyz.shape[0],), dtype=bool)  # noqa
         knn_result = p3dops.knn_points(xyz[None, ...], self._xyz[None, ...], K=1)
-        mask[knn_result.idx] = True
+        mask[knn_result.idx.squeeze()] = True
 
         return mask.detach().cpu().numpy()
 
@@ -306,11 +313,14 @@ class ReadPCD:
 
         self._opacity = _inverse_sigmoid(rescaled_opacity)
 
-    def offline_change_scale(self, div: float):
+    def offline_change_scale(self, div: float, mask=None):
         scales = torch.exp(self._scaling)
         new_scales = scales / div
+        if mask is None:
+            self._scaling = torch.log(new_scales)
+        else:
+            self._scaling[mask] = torch.log(new_scales)[mask]
 
-        self._scaling = torch.log(new_scales)
 
     def remove_rotation(self):
         batch_size = self._rotation.shape[0]
@@ -321,6 +331,15 @@ class ReadPCD:
         self._rotation = nn.Parameter(
             torch.tensor(new_rots, dtype=torch.float, device="cuda")
         )
+
+    def downsample_mask(self, downsample_ratio: float):
+        # remove outliers based on nerfstudio's method
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(self._xyz.detach().float().cpu().numpy())
+
+        new_pcd = pcd.random_down_sample(downsample_ratio)
+        return self.create_mask_from_xyz(np.array(new_pcd.points))
+
 
 pcd_manager = ReadPCD(3)
 mask = None
@@ -333,8 +352,10 @@ pcd_manager.load_ply(original_path)
 
 # pcd_manager.plot_3d(downscale_ratio=500)
 # mask =pcd_manager.de
-mask = pcd_manager.create_mask_from_modified_ply_py3d(modified_path)
-pcd_manager.change_transparency(mask, new_transparency=0)
+mask = pcd_manager.downsample_mask(0.5)
+pcd_manager.offline_change_scale(0.7, )
+# mask = pcd_manager.create_mask_from_modified_ply_py3d(modified_path)
+# pcd_manager.change_transparency(mask, new_transparency=0)
 # pcd_manager.offline_change_opacity()
 # pcd_manager.offline_change_scale(div=1.1)
 

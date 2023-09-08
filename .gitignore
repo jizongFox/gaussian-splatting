@@ -8,5 +8,5 @@ tensorboard_3d
 screenshots
 .idea
 venv
-output
 data
+run_exp.py
