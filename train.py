@@ -8,12 +8,15 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+import numpy as np
 import os
 import random
 import sys
 import torch
+from PIL import Image
 from argparse import ArgumentParser
 from loguru import logger
+from pathlib import Path
 from random import randint
 from tqdm import tqdm
 
@@ -123,11 +126,18 @@ def training(
             render_pkg["visibility_filter"],
             render_pkg["radii"],
         )
+        image_name = viewpoint_cam.image_name
+        mask_path = Path(args.source_path) / "selected_image-masks-colmap" / f"{image_name}.png.png"
+        with Image.open(mask_path) as fmask:
+            fmask = fmask.convert("L").resize((image.shape[2], image.shape[1]), Image.NEAREST)
+
+            mask = np.array(np.array(fmask) >= 1, dtype=np.float32)
 
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
 
-        Ll1 = l1_loss(image, gt_image)
+        Ll1 = l1_loss(image, gt_image, reduction="none")
+        Ll1 = (Ll1 * torch.from_numpy(mask).cuda()[None, ...]).mean()
 
         # jizong test
         if args.loss_config is not None:
@@ -283,10 +293,10 @@ if __name__ == "__main__":
     parser.add_argument("--debug_from", type=int, default=-1)
     parser.add_argument("--detect_anomaly", action="store_true", default=False)
     parser.add_argument(
-        "--test_iterations", nargs="+", type=int, default=[5000, 7_000, 10000, 12_500, 15_000, ]
+        "--test_iterations", nargs="+", type=int, default=[2000, 5000, 7_000, 10000, 12_500, 15_000, ]
     )
     parser.add_argument(
-        "--save_iterations", nargs="+", type=int, default=[5000, 7_000, 10000, 12_500, 15_000, ]
+        "--save_iterations", nargs="+", type=int, default=[2000, 5000, 7_000, 10000, 12_500, 15_000, ]
     )
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])

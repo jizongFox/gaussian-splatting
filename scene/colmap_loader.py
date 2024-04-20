@@ -8,10 +8,11 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-
 import collections
-import numpy as np
 import struct
+import typing as t
+
+import numpy as np
 
 CameraModel = collections.namedtuple(
     "CameraModel", ["model_id", "model_name", "num_params"]
@@ -196,7 +197,7 @@ def read_intrinsics_text(path):
     return cameras
 
 
-def read_extrinsics_binary(path_to_model_file):
+def read_extrinsics_binary(path_to_model_file) -> t.Dict[int, Image]:
     """
     see: src/base/reconstruction.cc
         void Reconstruction::ReadImagesBinary(const std::string& path)
@@ -242,7 +243,7 @@ def read_extrinsics_binary(path_to_model_file):
     return images
 
 
-def read_intrinsics_binary(path_to_model_file):
+def read_intrinsics_binary(path_to_model_file) -> t.Dict[int, Camera]:
     """
     see: src/base/reconstruction.cc
         void Reconstruction::WriteCamerasBinary(const std::string& path)

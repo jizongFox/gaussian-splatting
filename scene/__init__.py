@@ -25,13 +25,13 @@ class Scene:
     gaussians: GaussianModel
 
     def __init__(
-        self,
-        args: ModelParams,
-        gaussians: GaussianModel,
-        load_iteration=None,
-        shuffle=True,
-        resolution_scales=[1.0],
-        pcd_path=None,
+            self,
+            args: ModelParams,
+            gaussians: GaussianModel,
+            load_iteration=None,
+            shuffle=True,
+            resolution_scales=[1.0],
+            pcd_path=None,
     ):
         """
         :param path: Path to colmap scene main folder.
@@ -63,6 +63,11 @@ class Scene:
             scene_info = sceneLoadTypeCallbacks["Blender"](
                 args.source_path, args.white_background, args.eval
             )
+        elif os.path.exists(os.path.join(args.source_path, "meta.json")):
+            print("Found slam file, assuming slam data set!")
+            scene_info = sceneLoadTypeCallbacks["Slam"](
+                args.source_path, args.images, args.eval,
+            )
         else:
             assert False, "Could not recognize scene type!"
 
@@ -73,7 +78,7 @@ class Scene:
 
         if not self.loaded_iter:
             with open(scene_info.ply_path, "rb") as src_file, open(
-                os.path.join(self.model_path, "input.ply"), "wb"
+                    os.path.join(self.model_path, "input.ply"), "wb"
             ) as dest_file:
                 dest_file.write(src_file.read())
             json_cams = []

@@ -1,11 +1,12 @@
 # this is to investigate the pcd dataformat
 import math
+from pathlib import Path
+
 import numpy as np
 import open3d as o3d
 import plotly.express as px
 import torch
 from loguru import logger
-from pathlib import Path
 from plyfile import PlyData, PlyElement
 from pytorch3d import ops as p3dops
 from torch import Tensor
@@ -133,7 +134,7 @@ class ReadPCD:
         rotation = self._rotation.detach().cpu().numpy()
 
         dtype_full = [
-            (attribute, "f4") for attribute in self._construct_list_of_attributes()
+            (attribute, "f4") for attribute in self.__construct_list_of_attributes()
         ]
 
         elements = np.empty(xyz.shape[0], dtype=dtype_full)
@@ -158,7 +159,7 @@ class ReadPCD:
         el = PlyElement.describe(elements, "vertex")
         PlyData([el]).write(path)
 
-    def _construct_list_of_attributes(self):
+    def __construct_list_of_attributes(self):
         l = ["x", "y", "z", "nx", "ny", "nz"]
         # All channels except the 3 DC
         for i in range(self._features_dc.shape[1] * self._features_dc.shape[2]):
@@ -172,7 +173,7 @@ class ReadPCD:
             l.append("rot_{}".format(i))
         return l
 
-    def create_mask_from_modified_ply(self, path):
+    def create_mask_from_modified_ply(self, path) -> np.ndarray:
         plydata = PlyData.read(path)
 
         xyz = np.stack(
@@ -189,7 +190,7 @@ class ReadPCD:
             mask[index_] = torch.any(torch.all(cur_item == xyz, dim=-1))
         return mask.detach().cpu().numpy()
 
-    def create_mask_from_modified_ply_py3d(self, path):
+    def create_mask_from_modified_ply_py3d(self, path) -> np.ndarray:
         plydata = PlyData.read(path)
 
         xyz = np.stack(
@@ -202,7 +203,7 @@ class ReadPCD:
         )
         return self.create_mask_from_xyz(xyz)
 
-    def create_mask_from_xyz(self, xyz: np.ndarray | Tensor):
+    def create_mask_from_xyz(self, xyz: np.ndarray | Tensor) -> np.ndarray:
         if isinstance(xyz, Tensor):
             xyz = xyz.cpu().detach().numpy()
         assert isinstance(xyz, np.ndarray), xyz.__class__.__name__
@@ -248,7 +249,7 @@ class ReadPCD:
 
     def create_mask_based_on_3d_scale(
             self, min_thres: float = 0, max_thres: float = 10000
-    ):
+    ) -> np.ndarray:
         scales = torch.exp(self._scaling)
         min_scale = scales.min(dim=1)[0]
         max_scale = scales.max(dim=1)[0]
@@ -258,7 +259,7 @@ class ReadPCD:
 
         return mask
 
-    def remove_outlier(self):
+    def remove_outlier(self) -> np.ndarray:
         # remove outliers based on nerfstudio's method
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(
@@ -298,7 +299,7 @@ class ReadPCD:
 
         # this mean distance should be colaborate with xyz range.
 
-    def offline_change_opacity(self):
+    def change_opacity_(self):
         opacity = torch.sigmoid(self._opacity)
         ranged_opacity = opacity * 2 - 1
 
@@ -307,13 +308,9 @@ class ReadPCD:
 
         rescaled_opacity = (odd_pow(ranged_opacity, 1 / 3) + 1) / 2
 
-        def _inverse_sigmoid(value: Tensor):
-            value.clip_(1e-5, 0.9999)
-            return torch.log(value / (1 - value))
-
         self._opacity = _inverse_sigmoid(rescaled_opacity)
 
-    def offline_change_scale(self, div: float, mask=None):
+    def change_scale_(self, div: float, mask=None):
         scales = torch.exp(self._scaling)
         new_scales = scales / div
         if mask is None:
@@ -321,8 +318,7 @@ class ReadPCD:
         else:
             self._scaling[mask] = torch.log(new_scales)[mask]
 
-
-    def remove_rotation(self):
+    def remove_rotation_(self):
         batch_size = self._rotation.shape[0]
         from nerfstudio.process_data.colmap_utils import rotmat2qvec
 
@@ -332,7 +328,7 @@ class ReadPCD:
             torch.tensor(new_rots, dtype=torch.float, device="cuda")
         )
 
-    def downsample_mask(self, downsample_ratio: float):
+    def downsample_mask(self, downsample_ratio: float) -> np.ndarray:
         # remove outliers based on nerfstudio's method
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(self._xyz.detach().float().cpu().numpy())
@@ -353,7 +349,7 @@ pcd_manager.load_ply(original_path)
 # pcd_manager.plot_3d(downscale_ratio=500)
 # mask =pcd_manager.de
 mask = pcd_manager.downsample_mask(0.5)
-pcd_manager.offline_change_scale(0.7, )
+pcd_manager.change_scale_(0.7, )
 # mask = pcd_manager.create_mask_from_modified_ply_py3d(modified_path)
 # pcd_manager.change_transparency(mask, new_transparency=0)
 # pcd_manager.offline_change_opacity()
