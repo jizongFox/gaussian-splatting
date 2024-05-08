@@ -10,32 +10,29 @@
 #
 from __future__ import annotations
 
-import kornia
-import torch
-import torch.nn.functional as F
 import typing as t
 from functools import lru_cache
 from math import exp
+
+import kornia
+import torch
+import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.autograd import Variable
 
 
-def l1_loss(network_output, gt, reduction: t.Literal["mean", "sum", "none"] = "mean"):
-    if reduction == "mean":
+def l1_loss(network_output, gt, mask: Tensor = None):
+    if mask is None:
         return torch.abs((network_output - gt)).mean()
-    elif reduction == "sum":
-        return torch.abs((network_output - gt)).sum()
     else:
-        return torch.abs((network_output - gt))
+        return torch.abs((network_output - gt) * mask).mean()
 
 
-def l2_loss(network_output, gt, reduction: t.Literal["mean", "sum", "none"] = "mean"):
-    if reduction == "mean":
-        return ((network_output - gt) ** 2).mean()
-    elif reduction == "sum":
-        return ((network_output - gt) ** 2).sum()
+def l2_loss(network_output, gt, masks: Tensor = None):
+    if masks is None:
+        return torch.pow((network_output - gt), 2).mean()
     else:
-        return ((network_output - gt) ** 2)
+        return torch.pow((network_output - gt) * masks, 2).mean()
 
 
 def gaussian(window_size, sigma):
@@ -58,7 +55,7 @@ def create_window(window_size, channel):
     return window
 
 
-def ssim(img1, img2, window_size=11, size_average=True):
+def ssim(img1, img2, window_size=11, size_average=True, mask: Tensor = None):
     channel = img1.size(-3)
     window = create_window(window_size, channel)
 
@@ -66,10 +63,10 @@ def ssim(img1, img2, window_size=11, size_average=True):
         window = window.cuda(img1.get_device())
     window = window.type_as(img1)
 
-    return _ssim(img1, img2, window, window_size, channel, size_average)
+    return _ssim(img1, img2, window, window_size, channel, size_average, mask=mask)
 
 
-def _ssim(img1, img2, window, window_size, channel, size_average=True):
+def _ssim(img1, img2, window, window_size, channel, size_average=True, mask: Tensor = None):
     mu1 = F.conv2d(img1, window, padding=window_size // 2, groups=channel)
     mu2 = F.conv2d(img2, window, padding=window_size // 2, groups=channel)
 
@@ -92,9 +89,10 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
     C2 = 0.03 ** 2
 
     ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / (
-            (mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2)
+            (mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2) + 1e-8
     )
-
+    if mask is not None:
+        ssim_map = ssim_map * mask
     if size_average:
         return ssim_map.mean()
     else:
@@ -122,7 +120,7 @@ class Entropy(nn.Module):
     elements in the output, ``'sum'``: the output will be summed.
     """
 
-    def __init__(self, reduction="mean", eps=1e-16):
+    def __init__(self, reduction="mean", eps=1e-8):
         super().__init__()
         self._eps = eps
         self._reduction = reduction

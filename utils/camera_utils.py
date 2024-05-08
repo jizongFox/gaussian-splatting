@@ -8,10 +8,10 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+import os
 from multiprocessing.dummy import Pool
 
 import numpy as np
-import os
 
 from scene.cameras import Camera
 from scene.dataset_readers import _read_image
@@ -74,7 +74,7 @@ def loadCam(args, id, cam_info, resolution_scale):
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):
     # camera_list = []
-    with Pool(os.cpu_count()) as pool:
+    with Pool(os.cpu_count() * 2) as pool:
         camera_list = pool.starmap(
             loadCam, [(args, x, y, resolution_scale) for x, y in enumerate(cam_infos)]
         )

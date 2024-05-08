@@ -11,17 +11,17 @@
 from __future__ import annotations
 
 import json
-import numpy as np
 import os
-import rich
 import sys
-import torch
 import typing as t
-from PIL import Image
 from dataclasses import dataclass
 from functools import lru_cache
-from loguru import logger
 from pathlib import Path
+
+import numpy as np
+import torch
+from PIL import Image
+from loguru import logger
 from plyfile import PlyData, PlyElement
 
 from scene.colmap_loader import (read_extrinsics_text, read_intrinsics_text, qvec2rotmat, read_extrinsics_binary,
@@ -119,8 +119,8 @@ def readColmapCameras(cam_extrinsics: t.Dict[int, Image_], cam_intrinsics: t.Dic
             assert False, ("Colmap camera model not handled: "
                            "only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!")
 
-        image_path = os.path.join(images_folder, os.path.basename(extr.name))
-        image_name = os.path.basename(image_path).split(".")[0]
+        image_path = os.path.join(images_folder, extr.name)
+        image_name = "/".join([Path(x).stem for x in Path(image_path).relative_to(images_folder).parts])
         image = None
 
         cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path,
@@ -163,26 +163,22 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
     cam_intrinsics: t.Dict[int, Camera]
     cam_extrinsics: t.Dict[int, Image_]
     try:
-        cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
-        cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
+        cameras_extrinsic_file = os.path.join(path, "images.bin")
+        cameras_intrinsic_file = os.path.join(path, "cameras.bin")
         cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
         cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
     except:
-        cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.txt")
-        cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.txt")
+        cameras_extrinsic_file = os.path.join(path, "images.txt")
+        cameras_intrinsic_file = os.path.join(path, "cameras.txt")
         cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
         cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
 
-
-
-    reading_dir = "images" if images is None else images
     cam_infos_unsorted: t.List[CameraInfo] = readColmapCameras(
         cam_extrinsics=cam_extrinsics,
         cam_intrinsics=cam_intrinsics,
-        images_folder=os.path.join(path, reading_dir)
+        images_folder=images
     )
     cam_infos = sorted(cam_infos_unsorted.copy(), key=lambda x: x.image_name)
-
 
     if os.environ.get("DEBUG", "0") == "1":
         cam_infos = cam_infos[::2]
@@ -195,10 +191,11 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
         test_cam_infos = []
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
+    logger.info(f"nerf_normalization: {nerf_normalization}")
 
-    ply_path = os.path.join(path, "sparse/0/points3D.ply")
-    bin_path = os.path.join(path, "sparse/0/points3D.bin")
-    txt_path = os.path.join(path, "sparse/0/points3D.txt")
+    ply_path = os.path.join(path, "points3D.ply")
+    bin_path = os.path.join(path, "points3D.bin")
+    txt_path = os.path.join(path, "points3D.txt")
     if not os.path.exists(ply_path):
         logger.info("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
         assert Path(bin_path).exists() or Path(txt_path).exists()
@@ -267,8 +264,9 @@ def _read_slam_intrinsic_and_extrinsic(json_path: Path | str, image_folder: Path
             ]
         )
 
-    images = {}
     S = np.array([[-1, 0, 0, 0], [0, 0, -1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=float)
+
+    images = {}
 
     extrinsic_raw = list(iterate_word2cam_matrix(meta_file, image_folder))
     logger.info(f"Found {len(extrinsic_raw)} images in the meta file.")
@@ -309,6 +307,7 @@ def _read_slam_intrinsic_and_extrinsic(json_path: Path | str, image_folder: Path
         px, py, pz = T.numpy().flatten().tolist()
 
         qvec_w2c = np.array([qw, qx, qy, qz])
+        assert np.linalg.norm(qvec_w2c) - 1 < 1e-3, np.linalg.norm(qvec_w2c)
         tvec_w2c = np.array([px, py, pz])
 
         # get the camera_id:
@@ -326,17 +325,16 @@ def _read_slam_intrinsic_and_extrinsic(json_path: Path | str, image_folder: Path
     return cameras, images
 
 
-def readSlamSceneInfo(path, images, eval, llffhold=8, ):
-    assert Path(path).exists(), f"Path {path} does not exist."
-    reading_dir = "images" if images is None else images
+def readSlamSceneInfo(json_path, image_dir, eval, llffhold=8, ):
+    assert Path(json_path).exists(), f"Path {json_path} does not exist."
 
     cam_intrinsics, cam_extrinsics = _read_slam_intrinsic_and_extrinsic(
-        json_path=Path(path) / "meta.json",
-        image_folder=Path(path) / reading_dir,
+        json_path=Path(json_path),
+        image_folder=Path(image_dir),
         output_convention="slam"
     )
     cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics,
-                                           images_folder=os.path.join(path, reading_dir), )
+                                           images_folder=image_dir, )
     cam_infos = sorted(cam_infos_unsorted.copy(), key=lambda x: x.image_name)
 
     if os.environ.get("DEBUG", "0") == "1":

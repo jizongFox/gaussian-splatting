@@ -8,10 +8,11 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-import numpy as np
 import os
-import torch
 import typing as t
+
+import numpy as np
+import torch
 from loguru import logger
 from plyfile import PlyData, PlyElement
 from simple_knn._C import distCUDA2
@@ -54,7 +55,7 @@ class GaussianModel:
 
     def __init__(self, sh_degree: int):
         self.active_sh_degree = 0
-        self.max_sh_degree = sh_degree
+        self.max_sh_degree: int = sh_degree
         self._xyz = torch.empty(0)
         self._features_dc = torch.empty(0)
         self._features_rest = torch.empty(0)
@@ -160,12 +161,13 @@ class GaussianModel:
             distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()),
             0.0000001,
         )
-        scales = torch.log(torch.sqrt(dist2))[..., None].repeat(1, 3)
+        dist2 = torch.clamp(dist2, 0.0000001, 0.01)
+        scales = torch.log(torch.sqrt(dist2 / 3))[..., None].repeat(1, 3)
         rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
         rots[:, 0] = 1
 
         opacities = inverse_sigmoid(
-            0.1
+            0.99
             * torch.ones(
                 (fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"
             )
@@ -464,13 +466,13 @@ class GaussianModel:
         return optimizable_tensors
 
     def densification_postfix(
-        self,
-        new_xyz,
-        new_features_dc,
-        new_features_rest,
-        new_opacities,
-        new_scaling,
-        new_rotation,
+            self,
+            new_xyz,
+            new_features_dc,
+            new_features_rest,
+            new_opacities,
+            new_scaling,
+            new_rotation,
     ):
         d = {
             "xyz": new_xyz,
@@ -549,10 +551,14 @@ class GaussianModel:
         selected_pts_mask = torch.where(
             torch.norm(grads, dim=-1) >= grad_threshold, True, False
         )
+        gradient_points = selected_pts_mask.sum()
         selected_pts_mask = torch.logical_and(
             selected_pts_mask,
             torch.max(self.scaling, dim=1).values <= self.percent_dense * scene_extent,
         )
+        scale_points = selected_pts_mask.sum() - gradient_points
+        logger.trace(f"densified points: {selected_pts_mask.sum()}, including gradient-based {gradient_points} "
+                     f"and scale-based {-scale_points}")
 
         new_xyz = self._xyz[selected_pts_mask]
         new_features_dc = self._features_dc[selected_pts_mask]

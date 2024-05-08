@@ -10,6 +10,7 @@
 #
 
 import math
+
 import torch
 
 from diff_gaussian_rasterization import (
@@ -27,6 +28,8 @@ def render(
     bg_color: torch.Tensor,
     scaling_modifier=1.0,
     override_color=None,
+        override_mean3d: torch.Tensor | None = None,
+        override_quat: torch.Tensor | None = None,
 ):
     """
     Render the scene.
@@ -67,7 +70,12 @@ def render(
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
 
-    means3D = pc.xyz
+    if override_mean3d is None:
+        means3D = pc.xyz
+    else:
+        means3D = override_mean3d
+        # logger.warning("Overriding 3D means with provided values.")
+
     means2D = screenspace_points
     opacity = pc.opacity
 
@@ -76,11 +84,16 @@ def render(
     scales = None
     rotations = None
     cov3D_precomp = None
+    assert pipe.compute_cov3D_python is False
     if pipe.compute_cov3D_python:
         cov3D_precomp = pc.covariance(scaling_modifier)
     else:
         scales = pc.scaling
         rotations = pc.rotation
+
+    if override_quat is not None:
+        rotations = override_quat
+        # logger.warning("Overriding rotations with provided values.")
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
