@@ -53,7 +53,7 @@ class ParamGroup:
 
 class ModelParams(ParamGroup):
     def __init__(self, parser, sentinel=False):
-        self.sh_degree = 3
+        self.sh_degree = 2
         self._source_path = ""
         self._model_path = ""
         self._images = "images"
@@ -80,21 +80,21 @@ class PipelineParams(ParamGroup):
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
         self.iterations = 15_000
-        self.position_lr_init = 0.00016
-        self.position_lr_final = 0.0000016
+        self.position_lr_init = 0.000016
+        self.position_lr_final = 0.00000016
         self.position_lr_delay_mult = 0.01
         self.position_lr_max_steps = 30_000
         self.feature_lr = 0.0025
         self.opacity_lr = 0.05
         self.scaling_lr = 0.005
-        self.rotation_lr = 0.001
-        self.percent_dense = 0.01  # this is to reduce the size of the eclipse
+        self.rotation_lr = 0.005
+        self.percent_dense = 0.05  # this is to reduce the size of the eclipse
         self.lambda_dssim = 0.2
-        self.densification_interval = 200
-        self.opacity_reset_interval = 2500
-        self.densify_from_iter = 500
-        self.densify_until_iter = 10_000
-        self.densify_grad_threshold = 0.000175  # this is to split more
+        self.densification_interval = 500
+        self.opacity_reset_interval = 500000000
+        self.densify_from_iter = 4000
+        self.densify_until_iter = 12_000
+        self.densify_grad_threshold = 0.0001  # this is to split more
         super().__init__(parser, "Optimization Parameters")
 
 
