@@ -13,6 +13,7 @@ import random
 import sys
 from argparse import ArgumentParser
 from functools import lru_cache
+from itertools import chain
 from pathlib import Path
 from random import randint
 
@@ -21,10 +22,14 @@ import torch
 import yaml
 from PIL import Image
 from loguru import logger
+from torch import nn
+from torch.nn import functional as F
 from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from gaussian_renderer import render, network_gui
+from gaussian_renderer.finetune_utils import build_rotation, initialize_quat_delta, multiply_quaternions, \
+    VGGPerceptualLoss
 from scene import Scene, GaussianModel
 from scene.dataset_readers import _preload  # noqa
 from utils.general_utils import safe_state
@@ -68,19 +73,38 @@ def training(
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
+    # initialize poses.
+
     iter_start = torch.cuda.Event(enable_timing=True)
     iter_end = torch.cuda.Event(enable_timing=True)
 
-    viewpoint_stack = None
+    viewpoint_stack = scene.getTrainCameras().copy()
+    # initialize poses.
+    if args.activate_pose_grad:
+        logger.info("activating pose grad")
+    pose_delta = nn.ParameterList(
+        nn.Parameter(torch.zeros(3, device="cuda"), requires_grad=args.activate_pose_grad) for _ in
+        range(len(viewpoint_stack)))
+
+    percept_loss = VGGPerceptualLoss().cuda()
+
+    quat_delta = nn.ParameterList([nn.Parameter(x, requires_grad=args.activate_pose_grad) for x in
+                                   initialize_quat_delta(len(viewpoint_stack), device="cuda")])
+
+    optimizer_poses = torch.optim.Adam(chain(pose_delta, quat_delta), lr=1e-3)
+    optimizer_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_poses, T_max=opt.iterations // 2,
+
+                                                                     eta_min=1e-5)
+
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress", dynamic_ncols=True)
     first_iter += 1
 
     ent_criterion = Entropy()
     for iteration in range(first_iter, opt.iterations + 1):
-        if network_gui.conn == None:
+        if network_gui.conn is None:
             network_gui.try_connect()
-        while network_gui.conn != None:
+        while network_gui.conn is not None:
             try:
                 net_image_bytes = None
                 (
@@ -122,12 +146,30 @@ def training(
         # Pick a random Camera
         if not viewpoint_stack:
             viewpoint_stack = scene.getTrainCameras().copy()
+
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
 
         # Render
         if (iteration - 1) == debug_from:
             pipe.debug = True
-        render_pkg = render(viewpoint_cam, gaussians, pipe, background)
+        cur_id = torch.tensor(viewpoint_cam.uid, dtype=torch.long, device=torch.device("cuda"))
+        opt_cam_rot = quat_delta[cur_id]
+        opt_cam_trans = pose_delta[cur_id]
+
+        rel_transform = torch.eye(4).cuda().float()
+        rel_transform[:3, :3] = build_rotation(F.normalize(opt_cam_rot[None]))[0]
+        rel_transform[:3, 3] = opt_cam_trans
+
+        pts = gaussians.xyz
+        pts_ones = torch.ones(pts.shape[0], 1).cuda().float()
+        pts4 = torch.cat((pts, pts_ones), dim=1)
+        transformed_pts = (rel_transform @ pts4.T).T[:, :3]
+
+        quat = F.normalize(opt_cam_rot[None])
+        _rotations = multiply_quaternions(gaussians.rotation, quat.unsqueeze(0)).squeeze(0)
+
+        render_pkg = render(viewpoint_cam, gaussians, pipe, background, override_mean3d=transformed_pts,
+                            override_quat=_rotations)
         image, viewspace_point_tensor, visibility_filter, radii = (
             render_pkg["render"],
             render_pkg["viewspace_points"],
@@ -153,6 +195,11 @@ def training(
         image = image * mask_torch
 
         Ll1 = l1_loss(image, gt_image, )
+
+        if cur_id in list(range(1000)):
+            tb_writer.add_images(f"train/{cur_id}/render", image[None], iteration)
+            tb_writer.add_images(f"train/{cur_id}/gt", gt_image[None], iteration)
+            tb_writer.add_images(f"train/{cur_id}/diff", torch.abs(image - gt_image)[None], iteration)
 
         # jizong test
         if args.loss_config is not None:
@@ -279,12 +326,14 @@ def training(
                 logger.trace(f"calling densify_and_prune at iteration {iteration}")
                 gaussians.densify_and_prune(
                     opt.densify_grad_threshold,
-                    0.0001,
+                    0.005,
                     scene.cameras_extent,
                     size_threshold,
                 )
 
-            if iteration % opt.opacity_reset_interval == 0:
+            if iteration % opt.opacity_reset_interval == 0 or (
+                    dataset.white_background and iteration == opt.densify_from_iter
+            ):
                 logger.trace("calling reset_opacity")
                 gaussians.reset_opacity()
         else:
@@ -297,6 +346,9 @@ def training(
         # Optimizer step
         gaussians.optimizer.step()
         gaussians.optimizer.zero_grad(set_to_none=True)
+        optimizer_poses.step()
+        optimizer_poses.zero_grad(set_to_none=True)
+        optimizer_scheduler.step()
 
         if iteration in checkpoint_iterations:
             print("\n[ITER {}] Saving Checkpoint".format(iteration))
@@ -304,6 +356,8 @@ def training(
                 (gaussians.capture(), iteration),
                 scene.model_path + "/chkpnt" + str(iteration) + ".pth",
             )
+            pose_checkpoint = {"pose_delta": pose_delta, "quat_delta": quat_delta}
+            torch.save(pose_checkpoint, scene.model_path + "/pose_ckpt" + str(iteration) + ".pth")
 
 
 if __name__ == "__main__":
@@ -343,6 +397,8 @@ if __name__ == "__main__":
     jizong_parser.add_argument("--meta-file", type=Path, help="meta file for the scene")
     jizong_parser.add_argument("--image-dir", type=Path, help="images directory")
     jizong_parser.add_argument("--mask-dir", type=Path, help="mask directory, where 0 is ignored, 1 is visible")
+    jizong_parser.add_argument("--activate-pose-grad", default=False, action="store_true",
+                               help="activate pose grad")
 
     args = parser.parse_args(sys.argv[1:])
     _hash = get_hash()
@@ -350,6 +406,7 @@ if __name__ == "__main__":
         args.model_path = os.path.join(args.model_path, "git_" + _hash)
 
     args.save_iterations.append(args.iterations)
+    args.checkpoint_iterations.extend(args.save_iterations)
 
     print("Optimizing " + args.model_path)
 
