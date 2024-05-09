@@ -8,28 +8,30 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+import numpy as np
 import os
 import random
 import sys
-import typing as t
-from argparse import ArgumentParser
-from functools import lru_cache
-from itertools import chain
-from pathlib import Path
-from random import randint
-
-import numpy as np
 import torch
+import typing as t
 import yaml
 from PIL import Image
+from argparse import ArgumentParser
+from itertools import chain
 from loguru import logger
+from pathlib import Path
+from random import randint
 from torch import nn
 from torch.nn import functional as F
 from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from gaussian_renderer import ori_render
-from gaussian_renderer.finetune_utils import build_rotation, initialize_quat_delta, multiply_quaternions
+from gaussian_renderer.finetune_utils import (
+    build_rotation,
+    initialize_quat_delta,
+    multiply_quaternions,
+)
 from scene import Scene, GaussianModel, Camera
 from scene.dataset_readers import _preload  # noqa
 from utils.general_utils import safe_state
@@ -42,21 +44,15 @@ _preload()
 TENSORBOARD_FOUND = True
 
 
-@lru_cache()
-def report_shape(image_shape):
-    logger.info(f"image shape: {image_shape}")
-
-
 def training(
-        dataset,
-        opt,
-        pipe,
-        testing_iterations,
-        saving_iterations,
-        checkpoint_iterations,
-        checkpoint,
-        *,
-        args
+    dataset,
+    opt,
+    testing_iterations,
+    saving_iterations,
+    checkpoint_iterations,
+    checkpoint,
+    *,
+    args,
 ):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
@@ -82,19 +78,28 @@ def training(
     if args.activate_pose_grad:
         logger.info("activating pose grad")
     pose_delta = nn.ParameterList(
-        nn.Parameter(torch.zeros(3, device="cuda"), requires_grad=args.activate_pose_grad) for _ in
-        range(len(viewpoint_stack)))
+        nn.Parameter(
+            torch.zeros(3, device="cuda"), requires_grad=args.activate_pose_grad
+        )
+        for _ in range(len(viewpoint_stack))
+    )
 
-    quat_delta = nn.ParameterList([nn.Parameter(x, requires_grad=args.activate_pose_grad) for x in
-                                   initialize_quat_delta(len(viewpoint_stack), device="cuda")])
+    quat_delta = nn.ParameterList(
+        [
+            nn.Parameter(x, requires_grad=args.activate_pose_grad)
+            for x in initialize_quat_delta(len(viewpoint_stack), device="cuda")
+        ]
+    )
 
     optimizer_poses = torch.optim.Adam(chain(pose_delta, quat_delta), lr=1e-3)
-    optimizer_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_poses, T_max=opt.iterations // 2,
-
-                                                                     eta_min=1e-5)
+    pose_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer_poses, T_max=opt.iterations // 2, eta_min=1e-5
+    )
 
     ema_loss_for_log = 0.0
-    progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress", dynamic_ncols=True)
+    progress_bar = tqdm(
+        range(first_iter, opt.iterations), desc="Training progress", dynamic_ncols=True
+    )
     first_iter += 1
 
     ent_criterion = Entropy()
@@ -114,7 +119,9 @@ def training(
         viewpoint_cam: Camera
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
 
-        cur_id = torch.tensor(viewpoint_cam.uid, dtype=torch.long, device=torch.device("cuda"))
+        cur_id = torch.tensor(
+            viewpoint_cam.uid, dtype=torch.long, device=torch.device("cuda")
+        )
         opt_cam_rot = quat_delta[cur_id]
         opt_cam_trans = pose_delta[cur_id]
 
@@ -128,10 +135,17 @@ def training(
         transformed_pts = (rel_transform @ pts4.T).T[:, :3]
 
         quat = F.normalize(opt_cam_rot[None])
-        _rotations = multiply_quaternions(gaussians.rotation, quat.unsqueeze(0)).squeeze(0)
+        _rotations = multiply_quaternions(
+            gaussians.rotation, quat.unsqueeze(0)
+        ).squeeze(0)
 
-        render_pkg = ori_render(viewpoint_cam, model=gaussians, bg_color=background, override_mean3d=transformed_pts,
-                                override_quat=_rotations)
+        render_pkg = ori_render(
+            viewpoint_cam,
+            model=gaussians,
+            bg_color=background,
+            override_mean3d=transformed_pts,
+            override_quat=_rotations,
+        )
 
         image, viewspace_point_tensor, visibility_filter, radii = (
             render_pkg["render"],
@@ -144,7 +158,9 @@ def training(
         if args.mask_dir is not None:
             mask_path = Path(args.mask_dir) / f"{image_name}.png.png"
             with Image.open(mask_path) as fmask:
-                fmask = fmask.convert("L").resize((image.shape[2], image.shape[1]), Image.NEAREST)
+                fmask = fmask.convert("L").resize(
+                    (image.shape[2], image.shape[1]), Image.NEAREST
+                )
 
             mask = np.array(np.array(fmask) >= 1, dtype=np.float32)
             mask_torch = torch.from_numpy(mask).cuda()[None, ...]
@@ -156,15 +172,24 @@ def training(
         gt_image = gt_image * mask_torch
         image = image * mask_torch
 
-        Ll1 = l1_loss(image, gt_image, )
+        Ll1 = l1_loss(
+            image,
+            gt_image,
+        )
 
         if cur_id in list(range(1000)):
             tb_writer.add_images(f"train/{cur_id}/render", image[None], iteration)
             tb_writer.add_images(f"train/{cur_id}/gt", gt_image[None], iteration)
-            tb_writer.add_images(f"train/{cur_id}/diff", torch.abs(image - gt_image)[None], iteration)
+            tb_writer.add_images(
+                f"train/{cur_id}/diff", torch.abs(image - gt_image)[None], iteration
+            )
 
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
-                1.0 - ssim(image, gt_image, )
+            1.0
+            - ssim(
+                image,
+                gt_image,
+            )
         )
 
         with torch.set_grad_enabled(True):
@@ -194,7 +219,12 @@ def training(
         # Progress bar
         ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
         if iteration % 10 == 0:
-            progress_bar.set_postfix({"pls": f"{gaussians.xyz.shape[0]:.1e}", "Loss": f"{ema_loss_for_log:.{7}f}"})
+            progress_bar.set_postfix(
+                {
+                    "pls": f"{gaussians.xyz.shape[0]:.1e}",
+                    "Loss": f"{ema_loss_for_log:.{7}f}",
+                }
+            )
             progress_bar.update(10)
         if iteration == opt.iterations:
             progress_bar.close()
@@ -223,16 +253,12 @@ def training(
             gaussians.max_radii2D[visibility_filter] = torch.max(
                 gaussians.max_radii2D[visibility_filter], radii[visibility_filter]
             )
-            gaussians.add_densification_stats(
-                viewspace_point_tensor, visibility_filter
-            )
-            size_threshold = (
-                12 if iteration > opt.opacity_reset_interval else None
-            )
+            gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+            size_threshold = 12 if iteration > opt.opacity_reset_interval else None
 
             if (
-                    iteration > opt.densify_from_iter
-                    and iteration % opt.densification_interval == 0
+                iteration > opt.densify_from_iter
+                and iteration % opt.densification_interval == 0
             ):
                 logger.trace(f"calling densify_and_prune at iteration {iteration}")
                 gaussians.densify_and_prune(
@@ -243,7 +269,7 @@ def training(
                 )
 
             if iteration % opt.opacity_reset_interval == 0 or (
-                    dataset.white_background and iteration == opt.densify_from_iter
+                dataset.white_background and iteration == opt.densify_from_iter
             ):
                 logger.trace("calling reset_opacity")
                 gaussians.reset_opacity()
@@ -251,7 +277,9 @@ def training(
             # after having densified the pcd, we should prune the invisibile 3d gaussians.
             if iteration % 500 == 0 and args.prune_after_densification:
                 opacity_mask = gaussians.opacity <= 0.005
-                logger.trace(f"pruned {opacity_mask.sum()} points at iteration {iteration}")
+                logger.trace(
+                    f"pruned {opacity_mask.sum()} points at iteration {iteration}"
+                )
                 gaussians.prune_points(opacity_mask.squeeze(-1))
 
         # Optimizer step
@@ -259,7 +287,7 @@ def training(
         gaussians.optimizer.zero_grad(set_to_none=True)
         optimizer_poses.step()
         optimizer_poses.zero_grad(set_to_none=True)
-        optimizer_scheduler.step()
+        pose_scheduler.step()
 
         if iteration in checkpoint_iterations:
             print("\n[ITER {}] Saving Checkpoint".format(iteration))
@@ -268,7 +296,10 @@ def training(
                 scene.model_path + "/chkpnt" + str(iteration) + ".pth",
             )
             pose_checkpoint = {"pose_delta": pose_delta, "quat_delta": quat_delta}
-            torch.save(pose_checkpoint, scene.model_path + "/pose_ckpt" + str(iteration) + ".pth")
+            torch.save(
+                pose_checkpoint,
+                scene.model_path + "/pose_ckpt" + str(iteration) + ".pth",
+            )
 
 
 if __name__ == "__main__":
@@ -282,34 +313,67 @@ if __name__ == "__main__":
     parser.add_argument("--debug_from", type=int, default=-1)
     parser.add_argument("--detect_anomaly", action="store_true", default=False)
     parser.add_argument(
-        "--test_iterations", nargs="+", type=int,
-        default=[1, 2000, 5000, 7_000, 10000, 12_500, 15_000, 30_000, 100_000, 150_000] + [i for i in
-                                                                                           range(2000, 150_000, 2000)]
+        "--test_iterations",
+        nargs="+",
+        type=int,
+        default=[1, 2000, 5000, 7_000, 10000, 12_500, 15_000, 30_000, 100_000, 150_000]
+        + [i for i in range(2000, 150_000, 2000)],
     )
     parser.add_argument(
-        "--save_iterations", nargs="+", type=int,
-        default=[1, 2000, 5000, 7_000, 10000, 12_500, 15_000, 30_000, 100_000, 150_000] + [i for i in
-                                                                                           range(2000, 150_000, 2000)]
+        "--save_iterations",
+        nargs="+",
+        type=int,
+        default=[1, 2000, 5000, 7_000, 10000, 12_500, 15_000, 30_000, 100_000, 150_000]
+        + [i for i in range(2000, 150_000, 2000)],
     )
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default=None)
     jizong_parser = parser.add_argument_group("jizong_test")
-    jizong_parser.add_argument("--loss-config",
-                               choices=["naive", "ssim", "l1", "l2", "tv", "ssim_21", "ssim_5", "ssim+hsv", "hsv",
-                                        "yiq", "ssim+yiq", "ssim+yiq+", "ssim-mres+yiq+"],
-                               type=str,
-                               help="jizong's loss configuration")
-    jizong_parser.add_argument("--ent-weight", type=float, default=1e-4, help="entropy on opacity")
-    jizong_parser.add_argument("--pcd-path", type=str, default=None, help="load pcd file")
-    jizong_parser.add_argument("--prune-after-densification", default=False, action="store_true",
-                               help="prune after densification")
+    jizong_parser.add_argument(
+        "--loss-config",
+        choices=[
+            "naive",
+            "ssim",
+            "l1",
+            "l2",
+            "tv",
+            "ssim_21",
+            "ssim_5",
+            "ssim+hsv",
+            "hsv",
+            "yiq",
+            "ssim+yiq",
+            "ssim+yiq+",
+            "ssim-mres+yiq+",
+        ],
+        type=str,
+        help="jizong's loss configuration",
+    )
+    jizong_parser.add_argument(
+        "--ent-weight", type=float, default=1e-4, help="entropy on opacity"
+    )
+    jizong_parser.add_argument(
+        "--pcd-path", type=str, default=None, help="load pcd file"
+    )
+    jizong_parser.add_argument(
+        "--prune-after-densification",
+        default=False,
+        action="store_true",
+        help="prune after densification",
+    )
     jizong_parser.add_argument("--no-hash", default=False, action="store_true")
     jizong_parser.add_argument("--meta-file", type=Path, help="meta file for the scene")
     jizong_parser.add_argument("--image-dir", type=Path, help="images directory")
-    jizong_parser.add_argument("--mask-dir", type=Path, help="mask directory, where 0 is ignored, 1 is visible")
-    jizong_parser.add_argument("--activate-pose-grad", default=False, action="store_true",
-                               help="activate pose grad")
+    jizong_parser.add_argument(
+        "--mask-dir", type=Path, help="mask directory, where 0 is ignored, 1 is visible"
+    )
+    jizong_parser.add_argument(
+        "--activate-pose-grad",
+        default=False,
+        action="store_true",
+        help="activate pose grad",
+    )
 
     args = parser.parse_args(sys.argv[1:])
     _hash = get_hash()
@@ -332,12 +396,11 @@ if __name__ == "__main__":
     training(
         lp.extract(args),
         op.extract(args),
-        pp.extract(args),
         args.test_iterations,
         args.save_iterations,
         args.checkpoint_iterations,
         args.start_checkpoint,
-        args=args
+        args=args,
     )
 
     # All done

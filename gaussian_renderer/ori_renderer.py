@@ -10,9 +10,8 @@
 #
 
 import math
-import typing as t
-
 import torch
+import typing as t
 from torch import Tensor
 
 from diff_gaussian_rasterization_ori import (
@@ -25,16 +24,16 @@ from utils.sh_utils import eval_sh
 
 
 def render(
-        viewpoint_camera: Camera,
-        model: GaussianModel,
-        *,
-        bg_color: torch.Tensor,
-        scaling_modifier=1.0,
-        override_color=None,
-        override_mean3d: torch.Tensor | None = None,
-        override_quat: torch.Tensor | None = None,
-        compute_cov3D_python: bool = False,
-        convert_SHs_python: bool = False,
+    viewpoint_camera: Camera,
+    model: GaussianModel,
+    *,
+    bg_color: torch.Tensor,
+    scaling_modifier=1.0,
+    override_color=None,
+    override_mean3d: torch.Tensor | None = None,
+    override_quat: torch.Tensor | None = None,
+    compute_cov3D_python: bool = False,
+    convert_SHs_python: bool = False,
 ) -> t.Dict[str, Tensor]:
     """
     Render the scene.
@@ -43,7 +42,9 @@ def render(
     """
 
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
-    screenspace_points = torch.zeros_like(model.xyz, dtype=model.xyz.dtype, requires_grad=True, device="cuda")
+    screenspace_points = torch.zeros_like(
+        model.xyz, dtype=model.xyz.dtype, requires_grad=True, device="cuda"
+    )
     screenspace_points.retain_grad()
 
     # Set up rasterization configuration
@@ -112,7 +113,14 @@ def render(
         colors_precomp = override_color
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen).
-    rendered_image, radii = rasterizer(
+    (
+        rendered_image,
+        radii,
+        num_rendered,
+        geomBuffer,
+        binningBuffer,
+        imgBuffer,
+    ) = rasterizer(
         means3D=means3D,
         means2D=means2D,
         shs=shs,
@@ -130,4 +138,8 @@ def render(
         "viewspace_points": screenspace_points,
         "visibility_filter": radii > 0,
         "radii": radii,
+        "num_rendered": num_rendered,
+        "geomBuffer": geomBuffer,
+        "binningBuffer": binningBuffer,
+        "imgBuffer": imgBuffer,
     }
