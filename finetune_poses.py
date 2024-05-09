@@ -55,7 +55,6 @@ def training(
         saving_iterations,
         checkpoint_iterations,
         checkpoint,
-        debug_from,
         *,
         args
 ):
@@ -105,7 +104,7 @@ def training(
         gaussians.update_learning_rate(iteration)
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
-        if iteration % 1000 == 0:
+        if iteration % 1000 == 0 and not gaussians.is_max_sh():
             gaussians.oneupSHdegree()
 
         # Pick a random Camera
@@ -131,7 +130,7 @@ def training(
         quat = F.normalize(opt_cam_rot[None])
         _rotations = multiply_quaternions(gaussians.rotation, quat.unsqueeze(0)).squeeze(0)
 
-        render_pkg = ori_render(viewpoint_cam, gaussians, pipe, background, override_mean3d=transformed_pts,
+        render_pkg = ori_render(viewpoint_cam, model=gaussians, bg_color=background, override_mean3d=transformed_pts,
                                 override_quat=_rotations)
 
         image, viewspace_point_tensor, visibility_filter, radii = (
@@ -141,7 +140,6 @@ def training(
             render_pkg["radii"],
         )
 
-        report_shape(image.shape)
         image_name = viewpoint_cam.image_name
         if args.mask_dir is not None:
             mask_path = Path(args.mask_dir) / f"{image_name}.png.png"
@@ -211,8 +209,8 @@ def training(
             iter_start.elapsed_time(iter_end),
             testing_iterations,
             scene,
-            render,
-            (pipe, background),
+            ori_render,
+            {"bg_color": background},
             global_args=args,
         )
         if iteration in saving_iterations:
@@ -339,7 +337,6 @@ if __name__ == "__main__":
         args.save_iterations,
         args.checkpoint_iterations,
         args.start_checkpoint,
-        args.debug_from,
         args=args
     )
 

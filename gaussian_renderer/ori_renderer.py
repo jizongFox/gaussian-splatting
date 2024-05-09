@@ -27,12 +27,14 @@ from utils.sh_utils import eval_sh
 def render(
         viewpoint_camera: Camera,
         model: GaussianModel,
-        pipe,
+        *,
         bg_color: torch.Tensor,
         scaling_modifier=1.0,
         override_color=None,
         override_mean3d: torch.Tensor | None = None,
         override_quat: torch.Tensor | None = None,
+        compute_cov3D_python: bool = False,
+        convert_SHs_python: bool = False,
 ) -> t.Dict[str, Tensor]:
     """
     Render the scene.
@@ -78,8 +80,8 @@ def render(
     scales = None
     rotations = None
     cov3D_precomp = None
-    assert pipe.compute_cov3D_python is False
-    if pipe.compute_cov3D_python:
+    assert compute_cov3D_python is False
+    if compute_cov3D_python:
         cov3D_precomp = model.covariance(scaling_modifier)
     else:
         scales = model.scaling
@@ -94,7 +96,7 @@ def render(
     shs = None
     colors_precomp = None
     if override_color is None:
-        if pipe.convert_SHs_python:
+        if convert_SHs_python:
             shs_view = model.get_features.transpose(1, 2).view(
                 -1, 3, (model.max_sh_degree + 1) ** 2
             )

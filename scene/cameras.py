@@ -102,12 +102,12 @@ class Camera(nn.Module):
             .transpose(0, 1)
             .cuda()
         )
-        # _projection_matrix is the P matrix with transpose (P^{T}).
+        # TODO _projection_matrix is the P matrix with transpose (P^{T}).
 
         self.world_view_transform = (
             torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).cuda()
         )
-        # world_view_transform records the w2c matrix with transpose (w2c^{T}).
+        # todo  world_view_transform records the w2c matrix with transpose (w2c^{T}).
 
         self.full_proj_transform = (
             self.world_view_transform.unsqueeze(0).bmm(
