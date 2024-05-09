@@ -10,15 +10,17 @@
 #
 
 import math
+from typing import NamedTuple
+
 import numpy as np
 import torch
-from typing import NamedTuple
+from jaxtyping import Float
 
 
 class BasicPointCloud(NamedTuple):
-    points: np.ndarray
-    colors: np.ndarray
-    normals: np.ndarray
+    points: Float[np.ndarray, "b 3"]
+    colors: Float[np.ndarray, "b 3"]
+    normals: Float[np.ndarray, "b 3"]
 
 
 def geom_transform_points(points, transf_matrix):
@@ -31,23 +33,16 @@ def geom_transform_points(points, transf_matrix):
     return (points_out[..., :3] / denom).squeeze(dim=0)
 
 
-def getWorld2View(R, t):
-    """
-    this returns the original world2camera matrix.
-    """
-    Rt = np.zeros((4, 4))
-    Rt[:3, :3] = R.transpose()
-    Rt[:3, 3] = t
-    Rt[3, 3] = 1.0
-    return np.float32(Rt)
-
-
-def getWorld2View2(R, t, translate=np.array([0.0, 0.0, 0.0]), scale=1.0) -> np.ndarray:
+def getWorld2View2(R, t, translate: np.ndarray | None = None, scale: float | None = None) -> np.ndarray:
     """
     this gives the world2camera matrix which already takes the camera pose transformation,
     such as centering and scaling.
     return world to camera matrix of 4X4
     """
+    if translate is None:
+        translate = np.array([0.0, 0.0, 0.0])
+    if scale is None:
+        scale = 1.0
 
     Rt = np.zeros((4, 4))
     Rt[:3, :3] = R.transpose()  # R for w2c

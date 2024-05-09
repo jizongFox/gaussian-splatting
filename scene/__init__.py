@@ -12,10 +12,12 @@
 import json
 import os
 import random
+import typing as t
 
 from loguru import logger
 
 from arguments import ModelParams
+from scene.cameras import Camera
 from scene.dataset_readers import sceneLoadTypeCallbacks, fetchPly
 from scene.gaussian_model import GaussianModel
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
@@ -140,8 +142,8 @@ class Scene:
         )
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
 
-    def getTrainCameras(self, scale=1.0):
+    def getTrainCameras(self, scale=1.0) -> t.List[Camera]:
         return self.train_cameras[scale]
 
-    def getTestCameras(self, scale=1.0):
+    def getTestCameras(self, scale=1.0) -> t.List[Camera]:
         return self.test_cameras[scale]

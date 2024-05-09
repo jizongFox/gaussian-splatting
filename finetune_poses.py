@@ -11,6 +11,7 @@
 import os
 import random
 import sys
+import typing as t
 from argparse import ArgumentParser
 from functools import lru_cache
 from itertools import chain
@@ -27,13 +28,12 @@ from torch.nn import functional as F
 from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams, OptimizationParams
-from gaussian_renderer import render, network_gui
-from gaussian_renderer.finetune_utils import build_rotation, initialize_quat_delta, multiply_quaternions, \
-    VGGPerceptualLoss
-from scene import Scene, GaussianModel
+from gaussian_renderer import render
+from gaussian_renderer.finetune_utils import build_rotation, initialize_quat_delta, multiply_quaternions
+from scene import Scene, GaussianModel, Camera
 from scene.dataset_readers import _preload  # noqa
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, ssim, l2_loss, tv_loss, Entropy, hsv_color_space_loss, yiq_color_space_loss
+from utils.loss_utils import l1_loss, ssim, Entropy
 from utils.system_utils import get_hash
 from utils.train_utils import training_report, prepare_output_and_logger
 
@@ -77,7 +77,7 @@ def training(
 
     iter_start = torch.cuda.Event(enable_timing=True)
     iter_end = torch.cuda.Event(enable_timing=True)
-
+    viewpoint_stack: t.List[Camera]
     viewpoint_stack = scene.getTrainCameras().copy()
     # initialize poses.
     if args.activate_pose_grad:
@@ -85,8 +85,6 @@ def training(
     pose_delta = nn.ParameterList(
         nn.Parameter(torch.zeros(3, device="cuda"), requires_grad=args.activate_pose_grad) for _ in
         range(len(viewpoint_stack)))
-
-    percept_loss = VGGPerceptualLoss().cuda()
 
     quat_delta = nn.ParameterList([nn.Parameter(x, requires_grad=args.activate_pose_grad) for x in
                                    initialize_quat_delta(len(viewpoint_stack), device="cuda")])
@@ -102,39 +100,6 @@ def training(
 
     ent_criterion = Entropy()
     for iteration in range(first_iter, opt.iterations + 1):
-        if network_gui.conn is None:
-            network_gui.try_connect()
-        while network_gui.conn is not None:
-            try:
-                net_image_bytes = None
-                (
-                    custom_cam,
-                    do_training,
-                    pipe.convert_SHs_python,
-                    pipe.compute_cov3D_python,
-                    keep_alive,
-                    scaling_modifer,
-                ) = network_gui.receive()
-                if custom_cam != None:
-                    net_image = render(
-                        custom_cam, gaussians, pipe, background, scaling_modifer
-                    )["render"]
-                    net_image_bytes = memoryview(
-                        (torch.clamp(net_image, min=0, max=1.0) * 255)
-                        .byte()
-                        .permute(1, 2, 0)
-                        .contiguous()
-                        .cpu()
-                        .numpy()
-                    )
-                network_gui.send(net_image_bytes, dataset.source_path)
-                if do_training and (
-                        (iteration < int(opt.iterations)) or not keep_alive
-                ):
-                    break
-            except Exception as e:
-                network_gui.conn = None
-
         iter_start.record()
 
         gaussians.update_learning_rate(iteration)
@@ -147,11 +112,9 @@ def training(
         if not viewpoint_stack:
             viewpoint_stack = scene.getTrainCameras().copy()
 
+        viewpoint_cam: Camera
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack) - 1))
 
-        # Render
-        if (iteration - 1) == debug_from:
-            pipe.debug = True
         cur_id = torch.tensor(viewpoint_cam.uid, dtype=torch.long, device=torch.device("cuda"))
         opt_cam_rot = quat_delta[cur_id]
         opt_cam_trans = pose_delta[cur_id]
@@ -170,6 +133,7 @@ def training(
 
         render_pkg = render(viewpoint_cam, gaussians, pipe, background, override_mean3d=transformed_pts,
                             override_quat=_rotations)
+
         image, viewspace_point_tensor, visibility_filter, radii = (
             render_pkg["render"],
             render_pkg["viewspace_points"],
@@ -201,61 +165,10 @@ def training(
             tb_writer.add_images(f"train/{cur_id}/gt", gt_image[None], iteration)
             tb_writer.add_images(f"train/{cur_id}/diff", torch.abs(image - gt_image)[None], iteration)
 
-        # jizong test
-        if args.loss_config is not None:
-            if args.loss_config == "naive":
-                loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
-                        1.0 - ssim(image, gt_image, )
-                )
-            elif args.loss_config == "l1":
-                loss = Ll1
-            elif args.loss_config == "l2":
-                loss = l2_loss(image, gt_image, masks=mask_torch)
-            elif args.loss_config == "ssim":
-                loss = 1.0 - ssim(image, gt_image, )
-            elif args.loss_config == "ssim_21":
-                loss = 1.0 - ssim(image, gt_image, window_size=21, )
-            elif args.loss_config == "ssim_5":
-                loss = 1.0 - ssim(image, gt_image, window_size=5, )
-            elif args.loss_config == "tv":
-                loss = tv_loss(image[None, ...], gt_image[None, ...])
-            elif args.loss_config == "ssim+hsv":
-                loss = 0.8 * (1.0 - ssim(image, gt_image, )) + 0.2 * \
-                       hsv_color_space_loss(image[None, ...], gt_image[None, ...], channel_weight=(0.5, 1, 0.1))
-            elif args.loss_config == "hsv":
-                loss = hsv_color_space_loss(image[None, ...], gt_image[None, ...], channel_weight=(0.5, 1, 0.1))
+        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
+                1.0 - ssim(image, gt_image, )
+        )
 
-            elif args.loss_config == "yiq":
-                loss = yiq_color_space_loss(image[None, ...], gt_image[None, ...], channel_weight=(0.1, 1, 1))
-
-            elif args.loss_config == "ssim+yiq":
-                loss = 0.8 * (1.0 - ssim(image, gt_image, )) + 0.2 * yiq_color_space_loss(
-                    image[None, ...],
-                    gt_image[None, ...],
-                    channel_weight=(0.1, 1, 1))
-
-            elif args.loss_config == "ssim+yiq+":
-                loss = 0.5 * (1.0 - ssim(image, gt_image, )) + 0.5 * yiq_color_space_loss(
-                    image[None, ...],
-                    gt_image[None, ...],
-                    channel_weight=(
-                        0.05, 1, 1)
-                )
-            elif args.loss_config == "ssim-mres+yiq+":
-                loss = 0.2 * (1.0 - ssim(image, gt_image, window_size=11)) + \
-                       0.2 * (1.0 - ssim(image, gt_image, window_size=5)) + \
-                       0.2 * (1.0 - ssim(image, gt_image, window_size=21)) + \
-                       0.4 * yiq_color_space_loss(image[None, ...], gt_image[None, ...], channel_weight=(0.01, 1, 0.35))
-            else:
-                raise NotImplementedError(args.loss_config)
-        else:
-            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
-                    1.0 - ssim(image, gt_image, )
-            )
-
-        loss = loss
-
-        # else: entropy minimization
         with torch.set_grad_enabled(True):
             opacity = gaussians.opacity[visibility_filter]
             if len(opacity) == 0:
@@ -414,9 +327,6 @@ if __name__ == "__main__":
     Path(args.model_path, "config.yaml").write_text(yaml.dump(vars(args)))
     # Initialize system state (RNG)
     safe_state(args.quiet)
-
-    # Start GUI server, configure and run training
-    network_gui.init(args.ip, args.port)
 
     if args.loss_config is not None:
         logger.warning(f"args.loss_config={args.loss_config}")

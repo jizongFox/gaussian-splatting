@@ -21,12 +21,13 @@ from pathlib import Path
 import numpy as np
 import torch
 from PIL import Image
+from jaxtyping import Float
 from loguru import logger
 from plyfile import PlyData, PlyElement
 
 from scene.colmap_loader import (read_extrinsics_text, read_intrinsics_text, qvec2rotmat, read_extrinsics_binary,
-                                 read_intrinsics_binary, read_points3D_binary, read_points3D_text, Camera,
-                                 Image as Image_, )
+                                 read_intrinsics_binary, read_points3D_binary, read_points3D_text, Colmap_Camera,
+                                 Image as Colmap_Image, )
 from scene.gaussian_model import BasicPointCloud
 from scene.helper import SE3_to_quaternion_and_translation_torch
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
@@ -41,24 +42,37 @@ def _read_image(filename):
 @dataclass
 class CameraInfo:
     uid: int
+    """camera id in colmap"""
     R: np.ndarray
+    """R for c2w """
     T: np.ndarray
-    FovY: np.ndarray
-    FovX: np.ndarray
+    """T for w2c """
+    FovY: float
+    FovX: float
     image: np.ndarray | None
     image_path: str
     image_name: str
     width: int
     height: int
+    cx: float
+    cy: float
+
+    @property
+    def w2c(self) -> Float[np.ndarray, "4 4"]:
+        return getWorld2View2(self.R, self.T)
+
+    @property
+    def c2w(self) -> Float[np.ndarray, "4 4"]:
+        return np.linalg.inv(self.w2c)
 
 
 @dataclass
 class SceneInfo:
-    point_cloud: BasicPointCloud
-    train_cameras: list
-    test_cameras: list
+    point_cloud: BasicPointCloud | None
+    train_cameras: t.List[CameraInfo]
+    test_cameras: t.List[CameraInfo]
     nerf_normalization: dict
-    ply_path: str
+    ply_path: str | None | Path
 
 
 def getNerfppNorm(cam_info):
@@ -88,8 +102,8 @@ def getNerfppNorm(cam_info):
     return {"translate": translate, "radius": radius}
 
 
-def readColmapCameras(cam_extrinsics: t.Dict[int, Image_], cam_intrinsics: t.Dict[int, Camera], images_folder: str) -> \
-        t.List[CameraInfo]:
+def readColmapCameras(cam_extrinsics: t.Dict[int, Colmap_Image], cam_intrinsics: t.Dict[int, Colmap_Camera],
+                      images_folder: str) -> t.List[CameraInfo]:
     cam_infos = []
     for idx, key in enumerate(cam_extrinsics):
         sys.stdout.write("\r")
@@ -107,14 +121,19 @@ def readColmapCameras(cam_extrinsics: t.Dict[int, Image_], cam_intrinsics: t.Dic
         T = np.array(extr.tvec)  # here the T is not -RT, T for w2c
 
         if intr.model == "SIMPLE_PINHOLE":
+            raise UserWarning("SIMPLE_PINHOLE cameras are not supported!")
             focal_length_x = intr.params[0]
             FovY = focal2fov(focal_length_x, height)
             FovX = focal2fov(focal_length_x, width)
+            cx = intr.params[2]
+            cy = intr.params[3]
         elif intr.model == "PINHOLE":
             focal_length_x = intr.params[0]
             focal_length_y = intr.params[1]
             FovY = focal2fov(focal_length_y, height)
             FovX = focal2fov(focal_length_x, width)
+            cx = intr.params[2]
+            cy = intr.params[3]
         else:
             assert False, ("Colmap camera model not handled: "
                            "only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!")
@@ -124,7 +143,7 @@ def readColmapCameras(cam_extrinsics: t.Dict[int, Image_], cam_intrinsics: t.Dic
         image = None
 
         cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image, image_path=image_path,
-                              image_name=image_name, width=width, height=height, )
+                              image_name=image_name, width=width, height=height, cx=cx, cy=cy)
         cam_infos.append(cam_info)
     sys.stdout.write("\n")
     return cam_infos
@@ -160,8 +179,8 @@ def storePly(path, xyz, rgb):
 
 
 def readColmapSceneInfo(path, images, eval, llffhold=8):
-    cam_intrinsics: t.Dict[int, Camera]
-    cam_extrinsics: t.Dict[int, Image_]
+    cam_intrinsics: t.Dict[int, Colmap_Camera]
+    cam_extrinsics: t.Dict[int, Colmap_Image]
     try:
         cameras_extrinsic_file = os.path.join(path, "images.bin")
         cameras_intrinsic_file = os.path.join(path, "cameras.bin")
@@ -173,11 +192,8 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
         cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
         cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
 
-    cam_infos_unsorted: t.List[CameraInfo] = readColmapCameras(
-        cam_extrinsics=cam_extrinsics,
-        cam_intrinsics=cam_intrinsics,
-        images_folder=images
-    )
+    cam_infos_unsorted: t.List[CameraInfo] = readColmapCameras(cam_extrinsics=cam_extrinsics,
+                                                               cam_intrinsics=cam_intrinsics, images_folder=images)
     cam_infos = sorted(cam_infos_unsorted.copy(), key=lambda x: x.image_name)
 
     if os.environ.get("DEBUG", "0") == "1":
@@ -217,8 +233,8 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
 
 
 def _read_slam_intrinsic_and_extrinsic(json_path: Path | str, image_folder: Path | str,
-                                       output_convention: t.Literal["opencv", "slam"] = "opencv") \
-        -> t.Tuple[t.Dict[int, Camera], t.Dict[int, Image_]]:
+                                       output_convention: t.Literal["opencv", "slam"] = "opencv") -> t.Tuple[
+    t.Dict[int, Colmap_Camera], t.Dict[int, Colmap_Image]]:
     json_path = Path(json_path)
     image_folder = Path(image_folder)
     assert json_path.exists(), f"Path {json_path} does not exist."
@@ -239,9 +255,7 @@ def _read_slam_intrinsic_and_extrinsic(json_path: Path | str, image_folder: Path
                   camera_detail["intrinsics"]["camera_matrix"][2], camera_detail["intrinsics"]["camera_matrix"][5]]
         params = np.array(params).astype(float)
 
-        cameras[camera_id] = Camera(
-            id=camera_id, model=model, width=width, height=height, params=params
-        )
+        cameras[camera_id] = Colmap_Camera(id=camera_id, model=model, width=width, height=height, params=params)
 
     # del camera_id
 
@@ -256,13 +270,9 @@ def _read_slam_intrinsic_and_extrinsic(json_path: Path | str, image_folder: Path
 
     def quaternion_to_rotation_matrix(q):
         w, x, y, z = q
-        return np.array(
-            [
-                [1 - 2 * y ** 2 - 2 * z ** 2, 2 * x * y - 2 * z * w, 2 * x * z + 2 * y * w],
-                [2 * x * y + 2 * z * w, 1 - 2 * x ** 2 - 2 * z ** 2, 2 * y * z - 2 * x * w],
-                [2 * x * z - 2 * y * w, 2 * y * z + 2 * x * w, 1 - 2 * x ** 2 - 2 * y ** 2],
-            ]
-        )
+        return np.array([[1 - 2 * y ** 2 - 2 * z ** 2, 2 * x * y - 2 * z * w, 2 * x * z + 2 * y * w],
+                         [2 * x * y + 2 * z * w, 1 - 2 * x ** 2 - 2 * z ** 2, 2 * y * z - 2 * x * w],
+                         [2 * x * z - 2 * y * w, 2 * y * z + 2 * x * w, 1 - 2 * x ** 2 - 2 * y ** 2], ])
 
     S = np.array([[-1, 0, 0, 0], [0, 0, -1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=float)
 
@@ -313,26 +323,17 @@ def _read_slam_intrinsic_and_extrinsic(json_path: Path | str, image_folder: Path
         # get the camera_id:
         camera_id = available_cam_list.index(cur_camera_name)
 
-        images[image_id] = Image_(
-            id=image_id,
-            qvec=qvec_w2c,
-            tvec=tvec_w2c,
-            camera_id=camera_id,
-            name=cur_name,
-            xys=None,
-            point3D_ids=None,
-        )
+        images[image_id] = Colmap_Image(id=image_id, qvec=qvec_w2c, tvec=tvec_w2c, camera_id=camera_id, name=cur_name,
+                                        xys=None, point3D_ids=None, )
     return cameras, images
 
 
 def readSlamSceneInfo(json_path, image_dir, eval, llffhold=8, ):
     assert Path(json_path).exists(), f"Path {json_path} does not exist."
 
-    cam_intrinsics, cam_extrinsics = _read_slam_intrinsic_and_extrinsic(
-        json_path=Path(json_path),
-        image_folder=Path(image_dir),
-        output_convention="slam"
-    )
+    cam_intrinsics, cam_extrinsics = _read_slam_intrinsic_and_extrinsic(json_path=Path(json_path),
+                                                                        image_folder=Path(image_dir),
+                                                                        output_convention="slam")
     cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics,
                                            images_folder=image_dir, )
     cam_infos = sorted(cam_infos_unsorted.copy(), key=lambda x: x.image_name)
@@ -352,7 +353,7 @@ def readSlamSceneInfo(json_path, image_dir, eval, llffhold=8, ):
     pcd = None
 
     scene_info = SceneInfo(point_cloud=pcd, train_cameras=train_cam_infos, test_cameras=test_cam_infos,
-                           nerf_normalization=nerf_normalization, ply_path=None, )
+                           nerf_normalization=nerf_normalization, ply_path=None)
     return scene_info
 
 

@@ -17,7 +17,7 @@ import numpy as np
 CameraModel = collections.namedtuple(
     "CameraModel", ["model_id", "model_name", "num_params"]
 )
-Camera = collections.namedtuple("Camera", ["id", "model", "width", "height", "params"])
+Colmap_Camera = collections.namedtuple("Camera", ["id", "model", "width", "height", "params"])
 BaseImage = collections.namedtuple(
     "BaseImage", ["id", "qvec", "tvec", "camera_id", "name", "xys", "point3D_ids"]
 )
@@ -191,7 +191,7 @@ def read_intrinsics_text(path):
                 width = int(elems[2])
                 height = int(elems[3])
                 params = np.array(tuple(map(float, elems[4:])))
-                cameras[camera_id] = Camera(
+                cameras[camera_id] = Colmap_Camera(
                     id=camera_id, model=model, width=width, height=height, params=params
                 )
     return cameras
@@ -243,7 +243,7 @@ def read_extrinsics_binary(path_to_model_file) -> t.Dict[int, Image]:
     return images
 
 
-def read_intrinsics_binary(path_to_model_file) -> t.Dict[int, Camera]:
+def read_intrinsics_binary(path_to_model_file) -> t.Dict[int, Colmap_Camera]:
     """
     see: src/base/reconstruction.cc
         void Reconstruction::WriteCamerasBinary(const std::string& path)
@@ -265,7 +265,7 @@ def read_intrinsics_binary(path_to_model_file) -> t.Dict[int, Camera]:
             params = read_next_bytes(
                 fid, num_bytes=8 * num_params, format_char_sequence="d" * num_params
             )
-            cameras[camera_id] = Camera(
+            cameras[camera_id] = Colmap_Camera(
                 id=camera_id,
                 model=model_name,
                 width=width,

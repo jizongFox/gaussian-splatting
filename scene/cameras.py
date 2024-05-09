@@ -8,30 +8,53 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+import typing as t
 
 import numpy as np
 import torch
-from torch import nn
+from jaxtyping import Float
+from torch import nn, Tensor
 
 from utils.graphics_utils import getWorld2View2, getProjectionMatrix
 
 
 class Camera(nn.Module):
     def __init__(
-        self,
-        colmap_id,
-        R,
-        T,
-        FoVx,
-        FoVy,
-        image,
-        gt_alpha_mask,
-        image_name,
-        uid,
-        trans=np.array([0.0, 0.0, 0.0]),
-        scale=1.0,
-        data_device="cuda",
+            self,
+            colmap_id: int,
+            R: Float[np.ndarray, "3 3"],
+            T: Float[np.ndarray, "3"],
+            FoVx: float,
+            FoVy: float,
+            cx: float,
+            cy: float,
+            image: Float[Tensor, "3 h w"],
+            gt_alpha_mask: t.Optional[Float[Tensor, "h w"]],
+            image_name: str,
+            uid: int,
+            trans: Float[np.ndarray, "3 "] = np.array([0.0, 0.0, 0.0]),
+            scale: float = 1.0,
+            data_device: str = "cuda",
     ):
+        """
+        Camera class for storing camera information and image data.
+
+        :param colmap_id: Camera ID in COLMAP
+        :param R: Rotation matrix
+        :param T: Translation vector
+        :param FoVx: Field of view in x direction
+        :param FoVy: Field of view in y direction
+        :param cx: Principal point in x direction
+        :param cy: Principal point in y direction
+        :param image: Image data
+        :param gt_alpha_mask: Ground truth alpha mask
+        :param image_name: Image name
+        :param uid: Unique ID for each image.
+        :param trans: additional translation vector
+        :param scale: scale factor
+        :param data_device: device to store data
+
+        """
         super(Camera, self).__init__()
 
         self.uid = uid
@@ -40,6 +63,8 @@ class Camera(nn.Module):
         self.T = T
         self.FoVx = FoVx
         self.FoVy = FoVy
+        self.cx: float = cx
+        self.cy: float = cy
         self.image_name = image_name
 
         try:
@@ -69,6 +94,7 @@ class Camera(nn.Module):
         self.scale = scale
 
         # to ndc matrix?
+        # todo: this is to change where we take consideration of cx and cy
         self._projection_matrix = (
             getProjectionMatrix(
                 znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy
@@ -76,34 +102,41 @@ class Camera(nn.Module):
             .transpose(0, 1)
             .cuda()
         )
+        # _projection_matrix is the P matrix with transpose (P^{T}).
 
         self.world_view_transform = (
             torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).cuda()
         )
+        # world_view_transform records the w2c matrix with transpose (w2c^{T}).
 
         self.full_proj_transform = (
             self.world_view_transform.unsqueeze(0).bmm(
                 self._projection_matrix.unsqueeze(0)
             )
         ).squeeze(0)
+        # this means (proj@world2cam)^{T}, should be left multiplied with the xyz.
 
-        self.camera_center = self.world_view_transform.inverse()[3, :3]
+        self.cam2world = torch.inverse(torch.tensor(getWorld2View2(R, T, trans, scale))).cuda()
+        # self.world2cam = torch.tensor(getWorld2View2(R, T, trans, scale))
+        self.camera_center = self.cam2world[:3, 3].cuda()
 
     def extra_repr(self) -> str:
-        return f"name={self.image_name},\nR={self.R},\nT={self.T}"
+        return (f"name={self.image_name}, image_id={self.uid}, "
+                f"c2w={self.cam2world.cpu().numpy().tolist()}, "
+                f"center={self.camera_center}")
 
 
 class MiniCam:
     def __init__(
-        self,
-        width,
-        height,
-        fovy,
-        fovx,
-        znear,
-        zfar,
-        world_view_transform,
-        full_proj_transform,
+            self,
+            width,
+            height,
+            fovy,
+            fovx,
+            znear,
+            zfar,
+            world_view_transform,
+            full_proj_transform,
     ):
         self.image_width = width
         self.image_height = height
