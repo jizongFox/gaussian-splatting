@@ -10,10 +10,12 @@
 #
 
 import math
+import typing as t
 
 import torch
+from torch import Tensor
 
-from diff_gaussian_rasterization import (
+from diff_gaussian_rasterization_ori import (
     GaussianRasterizationSettings,
     GaussianRasterizer,
 )
@@ -31,7 +33,7 @@ def render(
         override_color=None,
         override_mean3d: torch.Tensor | None = None,
         override_quat: torch.Tensor | None = None,
-):
+) -> t.Dict[str, Tensor]:
     """
     Render the scene.
 

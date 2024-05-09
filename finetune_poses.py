@@ -28,7 +28,7 @@ from torch.nn import functional as F
 from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams, OptimizationParams
-from gaussian_renderer import render
+from gaussian_renderer import ori_render
 from gaussian_renderer.finetune_utils import build_rotation, initialize_quat_delta, multiply_quaternions
 from scene import Scene, GaussianModel, Camera
 from scene.dataset_readers import _preload  # noqa
@@ -131,8 +131,8 @@ def training(
         quat = F.normalize(opt_cam_rot[None])
         _rotations = multiply_quaternions(gaussians.rotation, quat.unsqueeze(0)).squeeze(0)
 
-        render_pkg = render(viewpoint_cam, gaussians, pipe, background, override_mean3d=transformed_pts,
-                            override_quat=_rotations)
+        render_pkg = ori_render(viewpoint_cam, gaussians, pipe, background, override_mean3d=transformed_pts,
+                                override_quat=_rotations)
 
         image, viewspace_point_tensor, visibility_filter, radii = (
             render_pkg["render"],
