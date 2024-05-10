@@ -15,9 +15,8 @@ import sys
 import torch
 import typing as t
 import yaml
-from PIL import Image
+from PIL import Image, ImageDraw
 from argparse import ArgumentParser
-from itertools import chain
 from loguru import logger
 from pathlib import Path
 from random import randint
@@ -25,12 +24,18 @@ from torch import nn
 from torch.nn import functional as F
 from tqdm import tqdm
 
-from arguments import ModelParams, PipelineParams, OptimizationParams
+from arguments import (
+    ModelParams,
+    PipelineParams,
+    OptimizationFinetuneParams,
+)
 from gaussian_renderer import ori_render
 from gaussian_renderer.finetune_utils import (
     build_rotation,
     initialize_quat_delta,
     multiply_quaternions,
+    apply_affine,
+    GradLayer,
 )
 from scene import Scene, GaussianModel, Camera
 from scene.dataset_readers import _preload  # noqa
@@ -69,7 +74,6 @@ def training(
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
     # initialize poses.
-
     iter_start = torch.cuda.Event(enable_timing=True)
     iter_end = torch.cuda.Event(enable_timing=True)
     viewpoint_stack: t.List[Camera]
@@ -77,29 +81,49 @@ def training(
     # initialize poses.
     if args.activate_pose_grad:
         logger.info("activating pose grad")
-    pose_delta = nn.ParameterList(
-        nn.Parameter(
-            torch.zeros(3, device="cuda"), requires_grad=args.activate_pose_grad
-        )
-        for _ in range(len(viewpoint_stack))
+    pose_delta = nn.Embedding(
+        len(viewpoint_stack),
+        3,
+    ).cuda()
+    pose_delta.weight = nn.Parameter(
+        torch.zeros_like(pose_delta.weight), requires_grad=args.activate_pose_grad
     )
 
-    quat_delta = nn.ParameterList(
-        [
-            nn.Parameter(x, requires_grad=args.activate_pose_grad)
-            for x in initialize_quat_delta(len(viewpoint_stack), device="cuda")
-        ]
+    quat_delta = nn.Embedding(len(viewpoint_stack), 4).cuda()
+    quat_delta.weight.data = nn.Parameter(
+        initialize_quat_delta(len(viewpoint_stack), device="cuda"),
+        requires_grad=args.activate_pose_grad,
     )
 
-    optimizer_poses = torch.optim.Adam(chain(pose_delta, quat_delta), lr=1e-3)
+    optimizer_poses = torch.optim.Adam(pose_delta.parameters(), lr=1e-5)
+    optimizer_poses.add_param_group(
+        {"params": quat_delta.parameters(), "lr": 5e-6, "weight_decay": 0}
+    )
     pose_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer_poses, T_max=opt.iterations // 2, eta_min=1e-5
+        optimizer_poses, T_max=opt.iterations, eta_min=1e-6
     )
+    # cx and cy
+    cxcy = nn.Embedding(4, 2).cuda()
+    cxcy.weight.data = nn.Parameter(
+        torch.zeros_like(cxcy.weight.data), requires_grad=args.activate_pose_grad
+    )
+    cxcy_optimizer = torch.optim.Adam(cxcy.parameters(), lr=5e-6)
+    cxcy_scheduler = torch.optim.lr_scheduler.StepLR(
+        cxcy_optimizer, step_size=opt.iterations // 4, gamma=0.1
+    )
+
+    fxfy = nn.Embedding(4, 2).cuda()
+    fxfy.weight.data = nn.Parameter(
+        torch.zeros_like(cxcy.weight.data), requires_grad=args.activate_pose_grad
+    )
+    fxfy_optimizer = torch.optim.Adam(fxfy.parameters(), lr=1e-6)
 
     ema_loss_for_log = 0.0
     progress_bar = tqdm(
         range(first_iter, opt.iterations), desc="Training progress", dynamic_ncols=True
     )
+    sober_filter = GradLayer().cuda()
+
     first_iter += 1
 
     ent_criterion = Entropy()
@@ -122,8 +146,11 @@ def training(
         cur_id = torch.tensor(
             viewpoint_cam.uid, dtype=torch.long, device=torch.device("cuda")
         )
-        opt_cam_rot = quat_delta[cur_id]
-        opt_cam_trans = pose_delta[cur_id]
+        cur_camera_id = torch.tensor(
+            viewpoint_cam.colmap_id, dtype=torch.long, device=torch.device("cuda")
+        )
+        opt_cam_rot = quat_delta(cur_id)
+        opt_cam_trans = pose_delta(cur_id)
 
         rel_transform = torch.eye(4).cuda().float()
         rel_transform[:3, :3] = build_rotation(F.normalize(opt_cam_rot[None]))[0]
@@ -153,6 +180,16 @@ def training(
             render_pkg["visibility_filter"],
             render_pkg["radii"],
         )
+        cur_cxcy = cxcy(cur_camera_id)
+        cur_fxfy_delta = fxfy(cur_camera_id)
+        image = apply_affine(
+            image[None, ...],
+            cur_cxcy[0][None, ...],
+            cur_cxcy[1][None, ...],
+            padding_value=background,
+            fx_delta=cur_fxfy_delta[0][None, ...],
+            fy_delta=cur_fxfy_delta[1][None, ...],
+        )[0]
 
         image_name = viewpoint_cam.image_name
         if args.mask_dir is not None:
@@ -164,6 +201,13 @@ def training(
 
             mask = np.array(np.array(fmask) >= 1, dtype=np.float32)
             mask_torch = torch.from_numpy(mask).cuda()[None, ...]
+            mask_torch2 = apply_affine(
+                torch.ones_like(mask_torch)[None, ...],
+                cur_cxcy[0][None, ...],
+                cur_cxcy[1][None, ...],
+                padding_value=0,
+            )[0]
+            mask_torch = mask_torch * mask_torch2
             #
         else:
             mask_torch = torch.ones_like(image)
@@ -177,12 +221,55 @@ def training(
             gt_image,
         )
 
-        if cur_id in list(range(1000)):
-            tb_writer.add_images(f"train/{cur_id}/render", image[None], iteration)
-            tb_writer.add_images(f"train/{cur_id}/gt", gt_image[None], iteration)
+        if int(viewpoint_cam.image_name.split("_")[-1]) in list(range(1435, 1613)):
             tb_writer.add_images(
-                f"train/{cur_id}/diff", torch.abs(image - gt_image)[None], iteration
+                f"train/{viewpoint_cam.image_name}/render", image[None], iteration
             )
+            tb_writer.add_images(
+                f"train/{viewpoint_cam.image_name}/gt", gt_image[None], iteration
+            )
+            tb_writer.add_images(
+                f"train/{viewpoint_cam.image_name}/diff",
+                torch.abs(image - gt_image)[None],
+                iteration,
+            )
+            save_path = (
+                Path(scene.model_path)
+                / f"train/{viewpoint_cam.image_name}/render_{iteration:07d}_pred.png"
+            )
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            Image.fromarray(
+                (image.detach().cpu().numpy() * 255).astype(np.uint8).transpose(1, 2, 0)
+            ).save(save_path)
+
+            save_path = (
+                Path(scene.model_path)
+                / f"train/{viewpoint_cam.image_name}/gt_{iteration:07d}.png"
+            )
+
+            Image.fromarray(
+                (gt_image.detach().cpu().numpy() * 255)
+                .astype(np.uint8)
+                .transpose(1, 2, 0)
+            ).save(save_path)
+
+            save_path = (
+                Path(scene.model_path)
+                / f"train/{viewpoint_cam.image_name}/diff_{iteration:07d}.png"
+            )
+
+            diff_pil = Image.fromarray(
+                (torch.abs(image - gt_image).detach().cpu().numpy() * 255)
+                .astype(np.uint8)
+                .transpose(1, 2, 0)
+            )
+            diff_pil_w_text = ImageDraw.Draw(diff_pil)
+
+            # Add Text to an image
+            diff_pil_w_text.text(
+                (50, 75), f"l1 loss: {Ll1.item():.5f}", fill=(255, 255, 255)
+            )
+            diff_pil.save(save_path)
 
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
             1.0
@@ -190,6 +277,9 @@ def training(
                 image,
                 gt_image,
             )
+        )
+        loss += l1_loss(
+            sober_filter(image[None, ...]), sober_filter(gt_image[None, ...])
         )
 
         with torch.set_grad_enabled(True):
@@ -288,6 +378,11 @@ def training(
         optimizer_poses.step()
         optimizer_poses.zero_grad(set_to_none=True)
         pose_scheduler.step()
+        cxcy_optimizer.step()
+        cxcy_optimizer.zero_grad(set_to_none=True)
+        fxfy_optimizer.step()
+        fxfy_optimizer.zero_grad(set_to_none=True)
+        cxcy_scheduler.step()
 
         if iteration in checkpoint_iterations:
             print("\n[ITER {}] Saving Checkpoint".format(iteration))
@@ -306,7 +401,7 @@ if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
     lp = ModelParams(parser)
-    op = OptimizationParams(parser)
+    op = OptimizationFinetuneParams(parser)
     pp = PipelineParams(parser)
     parser.add_argument("--ip", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=random.randint(3000, 65535))

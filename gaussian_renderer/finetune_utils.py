@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torchvision
 from jaxtyping import Float
-from torch import Tensor
+from torch import Tensor, nn
 from torch.nn import functional as F
 
 from scene.cameras import Camera
@@ -32,9 +32,7 @@ def quat2rotation(r: Float[Tensor, "batch 4"]) -> Float[Tensor, "batch 3 3"]:
     return R
 
 
-def rotation2quat(
-        R: Float[Tensor, "batch 3 3"]
-) -> Float[Tensor, "batch 4"]:
+def rotation2quat(R: Float[Tensor, "batch 3 3"]) -> Float[Tensor, "batch 4"]:
     q = torch.zeros(
         R.shape[0], 4, device=R.device, dtype=R.dtype
     )  # (batch_size, 4) x, y, z, w
@@ -87,7 +85,7 @@ def rotation2quat(
 
 def build_rotation(r):
     q = F.normalize(r, p=2, dim=1)
-    R = torch.zeros((q.size(0), 3, 3), device='cuda')
+    R = torch.zeros((q.size(0), 3, 3), device="cuda")
 
     r = q[:, 0]
     x = q[:, 1]
@@ -164,8 +162,12 @@ class VGGPerceptualLoss(torch.nn.Module):
         self.blocks = torch.nn.ModuleList(blocks)
         self.transform = torch.nn.functional.interpolate
         self.resize = resize
-        self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
-        self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+        self.register_buffer(
+            "mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+        )
+        self.register_buffer(
+            "std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+        )
 
     def forward(self, input, target, feature_layers=[0, 1, 2, 3], style_layers=[]):
         if input.shape[1] != 3:
@@ -174,8 +176,12 @@ class VGGPerceptualLoss(torch.nn.Module):
         input = (input - self.mean) / self.std
         target = (target - self.mean) / self.std
         if self.resize:
-            input = self.transform(input, mode='bilinear', size=(224, 224), align_corners=False)
-            target = self.transform(target, mode='bilinear', size=(224, 224), align_corners=False)
+            input = self.transform(
+                input, mode="bilinear", size=(224, 224), align_corners=False
+            )
+            target = self.transform(
+                target, mode="bilinear", size=(224, 224), align_corners=False
+            )
         loss = 0.0
         x = input
         y = target
@@ -196,3 +202,63 @@ class VGGPerceptualLoss(torch.nn.Module):
 if __name__ == "__main__":
     quats = initialize_quat_delta(100, torch.device("cuda"))
     breakpoint()
+
+
+def apply_affine(
+    image: Float[Tensor, "b 3 h w"],
+    cx: Float[Tensor, "b 1"],
+    cy: Float[Tensor, "b 1"],
+    fx_delta: Float[Tensor, "b 1"] | None = None,
+    fy_delta: Float[Tensor, "b 1"] | None = None,
+    padding_value: float | Tensor = 1.0,
+) -> Float[Tensor, "b 3 h w"]:
+    if isinstance(padding_value, Tensor) and len(padding_value.shape) == 1:
+        padding_value = padding_value[None, ..., None, None]
+    affine_matrix = torch.tensor(
+        [
+            [1, 0, 0],
+            [0, 1, 0],
+        ],
+        device=image.device,
+        dtype=image.dtype,
+    )
+    affine_matrix[..., 2] = torch.stack([cx, cy], dim=-1)
+
+    if fx_delta is not None and fy_delta is not None:
+        affine_matrix[0, 0] = 1 + fx_delta
+        affine_matrix[1, 1] = 1 + fy_delta
+
+    grid = F.affine_grid(affine_matrix[None, ...], image.size())
+
+    x = F.grid_sample(image - padding_value, grid) + padding_value
+    return x
+
+
+class GradLayer(nn.Module):
+    def __init__(self):
+        super(GradLayer, self).__init__()
+        kernel_v = [[0, -1, 0], [0, 0, 0], [0, 1, 0]]
+        kernel_h = [[0, 0, 0], [-1, 0, 1], [0, 0, 0]]
+        kernel_h = torch.FloatTensor(kernel_h).unsqueeze(0).unsqueeze(0)
+        kernel_v = torch.FloatTensor(kernel_v).unsqueeze(0).unsqueeze(0)
+        self.weight_h = nn.Parameter(data=kernel_h, requires_grad=False)
+        self.weight_v = nn.Parameter(data=kernel_v, requires_grad=False)
+
+    def _get_gray(self, x):
+        """
+        Convert image to its gray one.
+        """
+        gray_coeffs = [65.738, 129.057, 25.064]
+        convert = x.new_tensor(gray_coeffs).view(1, 3, 1, 1) / 256
+        x_gray = x.mul(convert).sum(dim=1)
+        return x_gray.unsqueeze(1)
+
+    def forward(self, x):
+        if x.shape[1] == 3:
+            x = self._get_gray(x)
+
+        x_v = F.conv2d(x, self.weight_v, padding=1)
+        x_h = F.conv2d(x, self.weight_h, padding=1)
+        x = torch.sqrt(torch.pow(x_v, 2) + torch.pow(x_h, 2) + 1e-6)
+
+        return x

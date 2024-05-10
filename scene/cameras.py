@@ -8,33 +8,37 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-import typing as t
-
 import numpy as np
 import torch
+import typing as t
 from jaxtyping import Float
 from torch import nn, Tensor
 
-from utils.graphics_utils import getWorld2View2, getProjectionMatrix
+from utils.graphics_utils import (
+    getWorld2View2,
+    getProjectionMatrixShift,
+)
 
 
 class Camera(nn.Module):
     def __init__(
-            self,
-            colmap_id: int,
-            R: Float[np.ndarray, "3 3"],
-            T: Float[np.ndarray, "3"],
-            FoVx: float,
-            FoVy: float,
-            cx: float,
-            cy: float,
-            image: Float[Tensor, "3 h w"],
-            gt_alpha_mask: t.Optional[Float[Tensor, "h w"]],
-            image_name: str,
-            uid: int,
-            trans: Float[np.ndarray, "3 "] = np.array([0.0, 0.0, 0.0]),
-            scale: float = 1.0,
-            data_device: str = "cuda",
+        self,
+        colmap_id: int,
+        R: Float[np.ndarray, "3 3"],
+        T: Float[np.ndarray, "3"],
+        FoVx: float,
+        FoVy: float,
+        focal_x: float,
+        focal_y: float,
+        cx: float,
+        cy: float,
+        image: Float[Tensor, "3 h w"],
+        gt_alpha_mask: t.Optional[Float[Tensor, "h w"]],
+        image_name: str,
+        uid: int,
+        trans: Float[np.ndarray, "3 "] = np.array([0.0, 0.0, 0.0]),
+        scale: float = 1.0,
+        data_device: str = "cuda",
     ):
         """
         Camera class for storing camera information and image data.
@@ -92,12 +96,23 @@ class Camera(nn.Module):
 
         self.trans = trans
         self.scale = scale
+        self.focal_x = focal_x
+        self.focal_y = focal_y
 
         # to ndc matrix?
         # todo: this is to change where we take consideration of cx and cy
         self._projection_matrix = (
-            getProjectionMatrix(
-                znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy
+            getProjectionMatrixShift(
+                znear=self.znear,
+                zfar=self.zfar,
+                fovX=self.FoVx,
+                fovY=self.FoVy,
+                focal_x=self.focal_x,
+                focal_y=self.focal_y,
+                cx=self.cx,
+                cy=self.cy,
+                width=self.image_width,
+                height=self.image_height,
             )
             .transpose(0, 1)
             .cuda()
@@ -116,27 +131,31 @@ class Camera(nn.Module):
         ).squeeze(0)
         # this means (proj@world2cam)^{T}, should be left multiplied with the xyz.
 
-        self.cam2world = torch.inverse(torch.tensor(getWorld2View2(R, T, trans, scale))).cuda()
+        self.cam2world = torch.inverse(
+            torch.tensor(getWorld2View2(R, T, trans, scale))
+        ).cuda()
         # self.world2cam = torch.tensor(getWorld2View2(R, T, trans, scale))
         self.camera_center = self.cam2world[:3, 3].cuda()
 
     def extra_repr(self) -> str:
-        return (f"name={self.image_name}, image_id={self.uid}, "
-                f"c2w={self.cam2world.cpu().numpy().tolist()}, "
-                f"center={self.camera_center}")
+        return (
+            f"name={self.image_name}, image_id={self.uid}, "
+            f"c2w={self.cam2world.cpu().numpy().tolist()}, "
+            f"center={self.camera_center}"
+        )
 
 
 class MiniCam:
     def __init__(
-            self,
-            width,
-            height,
-            fovy,
-            fovx,
-            znear,
-            zfar,
-            world_view_transform,
-            full_proj_transform,
+        self,
+        width,
+        height,
+        fovy,
+        fovx,
+        znear,
+        zfar,
+        world_view_transform,
+        full_proj_transform,
     ):
         self.image_width = width
         self.image_height = height
