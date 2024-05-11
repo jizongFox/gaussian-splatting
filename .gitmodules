@@ -10,3 +10,6 @@
 [submodule "submodules/diff-gaussian-rasterization-w-pose"]
 	path = submodules/diff-gaussian-rasterization-w-pose
 	url = https://github.com/jizongFox/diff-gaussian-rasterization-w-pose.git
+[submodule "submodules/icomma-diff-gaussian-rasterization"]
+	path = submodules/icomma-diff-gaussian-rasterization
+	url = https://github.com/jizongFox/icomma-diff-gaussian-rasterization.git
