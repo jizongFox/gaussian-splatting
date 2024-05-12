@@ -75,7 +75,7 @@ class CameraInfo:
         return np.linalg.inv(self.w2c)
 
 
-@dataclass
+@dataclass(slots=True)
 class SceneInfo:
     point_cloud: BasicPointCloud | None
     train_cameras: t.List[CameraInfo]
@@ -84,17 +84,19 @@ class SceneInfo:
     ply_path: str | None | Path
 
 
+def get_center_and_diag(cam_centers):
+    """
+    this function returns the center and the maximum norm of the camera poses.
+    """
+    cam_centers = np.hstack(cam_centers)
+    avg_cam_center = np.mean(cam_centers, axis=1, keepdims=True)
+    center = avg_cam_center
+    dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
+    diagonal = np.max(dist)
+    return center.flatten(), diagonal
+
+
 def getNerfppNorm(cam_info):
-    def get_center_and_diag(cam_centers):
-        """
-        this function returns the center and the maximum norm of the camera poses.
-        """
-        cam_centers = np.hstack(cam_centers)
-        avg_cam_center = np.mean(cam_centers, axis=1, keepdims=True)
-        center = avg_cam_center
-        dist = np.linalg.norm(cam_centers - center, axis=0, keepdims=True)
-        diagonal = np.max(dist)
-        return center.flatten(), diagonal
 
     cam_centers = []
 
