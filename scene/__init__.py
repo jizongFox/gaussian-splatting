@@ -13,7 +13,6 @@ import json
 import os
 import random
 import typing as t
-
 from loguru import logger
 
 from arguments import ModelParams
@@ -28,14 +27,14 @@ class Scene:
     gaussians: GaussianModel
 
     def __init__(
-            self,
-            args: ModelParams,
-            gaussians: GaussianModel,
-            load_iteration=None,
-            shuffle=True,
-            resolution_scales=[1.0],
-            pcd_path=None,
-            global_args=None
+        self,
+        args: ModelParams,
+        gaussians: GaussianModel,
+        load_iteration=None,
+        shuffle=True,
+        resolution_scales=[1.0],
+        pcd_path=None,
+        global_args=None,
     ):
         """
         :param path: Path to colmap scene main folder.
@@ -58,15 +57,21 @@ class Scene:
         self.train_cameras = {}
         self.test_cameras = {}
 
-        if os.path.exists(os.path.join(args.source_path, "cameras.bin")) or \
-                os.path.exists(os.path.join(args.source_path, "cameras.txt")):
+        if os.path.exists(
+            os.path.join(args.source_path, "cameras.bin")
+        ) or os.path.exists(os.path.join(args.source_path, "cameras.txt")):
             scene_info = sceneLoadTypeCallbacks["Colmap"](
-                args.source_path, global_args.image_dir, args.eval
+                args.source_path,
+                global_args.image_dir,
+                args.eval,
+                force_cxcy_center=global_args.force_cxcy_center,
             )
         elif global_args.meta_file is not None:
             print("Found slam file, assuming slam data set!")
             scene_info = sceneLoadTypeCallbacks["Slam"](
-                global_args.meta_file, global_args.image_dir, args.eval,
+                global_args.meta_file,
+                global_args.image_dir,
+                args.eval,
             )
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
@@ -84,7 +89,7 @@ class Scene:
 
         if not self.loaded_iter:
             with open(scene_info.ply_path, "rb") as src_file, open(
-                    os.path.join(self.model_path, "input.ply"), "wb"
+                os.path.join(self.model_path, "input.ply"), "wb"
             ) as dest_file:
                 dest_file.write(src_file.read())
             json_cams = []

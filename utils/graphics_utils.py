@@ -58,7 +58,7 @@ def getWorld2View2(
     return Rt.astype(np.float32)  # type: ignore
 
 
-def getProjectionMatrix(znear, zfar, fovX, fovY):
+def getProjectionMatrix(*, znear, zfar, fovX, fovY, **kwargs):
     """
     todo: normalized device coordinates?
     GPT4:
@@ -105,7 +105,7 @@ def getProjectionMatrix(znear, zfar, fovX, fovY):
 
 
 def getProjectionMatrixShift(
-    znear, zfar, focal_x, focal_y, cx, cy, width, height, fovX, fovY
+    *, znear, zfar, focal_x, focal_y, cx, cy, width, height, fovX, fovY
 ):
     # fov is a report between the pixel and the true z focal length in meter.
     tanHalfFovY = math.tan((fovY / 2))

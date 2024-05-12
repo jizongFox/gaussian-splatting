@@ -407,6 +407,9 @@ if __name__ == "__main__":
     jizong_parser.add_argument(
         "--mask-dir", type=Path, help="mask directory, where 0 is ignored, 1 is visible"
     )
+    jizong_parser.add_argument(
+        "--force-cxcy-center", action="store_true", help="centered cxcy"
+    )
 
     args = parser.parse_args(sys.argv[1:])
     _hash = get_hash()

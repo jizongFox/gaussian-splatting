@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torchvision
+import typing as t
 from jaxtyping import Float
 from torch import Tensor, nn
 from torch.nn import functional as F
@@ -211,6 +212,7 @@ def apply_affine(
     fx_delta: Float[Tensor, "b 1"] | None = None,
     fy_delta: Float[Tensor, "b 1"] | None = None,
     padding_value: float | Tensor = 1.0,
+    mode: t.Literal["bilinear", "nearest"] = "bilinear",
 ) -> Float[Tensor, "b 3 h w"]:
     if isinstance(padding_value, Tensor) and len(padding_value.shape) == 1:
         padding_value = padding_value[None, ..., None, None]
@@ -228,9 +230,12 @@ def apply_affine(
         affine_matrix[0, 0] = 1 + fx_delta
         affine_matrix[1, 1] = 1 + fy_delta
 
-    grid = F.affine_grid(affine_matrix[None, ...], image.size())
+    grid = F.affine_grid(affine_matrix[None, ...], image.size(), align_corners=False)
 
-    x = F.grid_sample(image - padding_value, grid) + padding_value
+    x = (
+        F.grid_sample(image - padding_value, grid, mode=mode, align_corners=False)
+        + padding_value
+    )
     return x
 
 

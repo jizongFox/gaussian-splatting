@@ -42,7 +42,7 @@ from scene.dataset_readers import _preload  # noqa
 from utils.general_utils import safe_state
 from utils.loss_utils import l1_loss, ssim, Entropy
 from utils.system_utils import get_hash
-from utils.train_utils import training_report, prepare_output_and_logger
+from utils.train_utils import prepare_output_and_logger
 
 _preload()
 
@@ -118,16 +118,12 @@ def training(
     )
     fxfy_optimizer = torch.optim.Adam(fxfy.parameters(), lr=1e-6)
 
-    ema_loss_for_log = 0.0
-    progress_bar = tqdm(
-        range(first_iter, opt.iterations), desc="Training progress", dynamic_ncols=True
-    )
     sober_filter = GradLayer().cuda()
 
     first_iter += 1
 
     ent_criterion = Entropy()
-    for iteration in range(first_iter, opt.iterations + 1):
+    for iteration in tqdm(range(first_iter, opt.iterations + 1)):
         iter_start.record()
 
         gaussians.update_learning_rate(iteration)
@@ -206,6 +202,7 @@ def training(
                 cur_cxcy[0][None, ...],
                 cur_cxcy[1][None, ...],
                 padding_value=0,
+                mode="nearest",
             )[0]
             mask_torch = mask_torch * mask_torch2
             #
@@ -305,72 +302,6 @@ def training(
         if torch.isnan(loss):
             logger.error(f"loss is NaN at iteration {iteration}")
             breakpoint()
-
-        # Progress bar
-        ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
-        if iteration % 10 == 0:
-            progress_bar.set_postfix(
-                {
-                    "pls": f"{gaussians.xyz.shape[0]:.1e}",
-                    "Loss": f"{ema_loss_for_log:.{7}f}",
-                }
-            )
-            progress_bar.update(10)
-        if iteration == opt.iterations:
-            progress_bar.close()
-
-        # Log and save
-        training_report(
-            tb_writer,
-            iteration,
-            Ll1,
-            loss,
-            l1_loss,
-            iter_start.elapsed_time(iter_end),
-            testing_iterations,
-            scene,
-            ori_render,
-            {"bg_color": background},
-            global_args=args,
-        )
-        if iteration in saving_iterations:
-            print("\n[ITER {}] Saving Gaussians".format(iteration))
-            scene.save(iteration)
-
-        # Densification
-        if iteration < opt.densify_until_iter:
-            # Keep track of max radii in image-space for pruning
-            gaussians.max_radii2D[visibility_filter] = torch.max(
-                gaussians.max_radii2D[visibility_filter], radii[visibility_filter]
-            )
-            gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
-            size_threshold = 12 if iteration > opt.opacity_reset_interval else None
-
-            if (
-                iteration > opt.densify_from_iter
-                and iteration % opt.densification_interval == 0
-            ):
-                logger.trace(f"calling densify_and_prune at iteration {iteration}")
-                gaussians.densify_and_prune(
-                    opt.densify_grad_threshold,
-                    0.005,
-                    scene.cameras_extent,
-                    size_threshold,
-                )
-
-            if iteration % opt.opacity_reset_interval == 0 or (
-                dataset.white_background and iteration == opt.densify_from_iter
-            ):
-                logger.trace("calling reset_opacity")
-                gaussians.reset_opacity()
-        else:
-            # after having densified the pcd, we should prune the invisibile 3d gaussians.
-            if iteration % 500 == 0 and args.prune_after_densification:
-                opacity_mask = gaussians.opacity <= 0.005
-                logger.trace(
-                    f"pruned {opacity_mask.sum()} points at iteration {iteration}"
-                )
-                gaussians.prune_points(opacity_mask.squeeze(-1))
 
         # Optimizer step
         gaussians.optimizer.step()

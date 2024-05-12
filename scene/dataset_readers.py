@@ -217,7 +217,9 @@ def storePly(path, xyz, rgb):
     ply_data.write(path)
 
 
-def readColmapSceneInfo(path, images, eval, llffhold=8):
+def readColmapSceneInfo(
+    path, images, eval, llffhold=8, force_cxcy_center: bool = False
+):
     cam_intrinsics: t.Dict[int, Colmap_Camera]
     cam_extrinsics: t.Dict[int, Colmap_Image]
     try:
@@ -230,6 +232,11 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
         cameras_intrinsic_file = os.path.join(path, "cameras.txt")
         cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
         cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
+    if force_cxcy_center:
+        logger.warning("Forcing cx and cy to be the center of the image.")
+        for key in cam_intrinsics:
+            cam_intrinsics[key].params[2] = cam_intrinsics[key].width / 2
+            cam_intrinsics[key].params[3] = cam_intrinsics[key].height / 2
 
     cam_infos_unsorted: t.List[CameraInfo] = readColmapCameras(
         cam_extrinsics=cam_extrinsics,
