@@ -8,11 +8,10 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-import os
-import typing as t
-
 import numpy as np
+import os
 import torch
+import typing as t
 from loguru import logger
 from plyfile import PlyData, PlyElement
 from simple_knn._C import distCUDA2
@@ -164,7 +163,7 @@ class GaussianModel:
             distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()),
             0.0000001,
         )
-        dist2 = torch.clamp(dist2, 0.0000001, 0.01)
+        dist2 = torch.clamp(dist2, 0.0000001, 0.003)
         scales = torch.log(torch.sqrt(dist2 / 3))[..., None].repeat(1, 3)
         rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
         rots[:, 0] = 1
@@ -469,13 +468,13 @@ class GaussianModel:
         return optimizable_tensors
 
     def densification_postfix(
-            self,
-            new_xyz,
-            new_features_dc,
-            new_features_rest,
-            new_opacities,
-            new_scaling,
-            new_rotation,
+        self,
+        new_xyz,
+        new_features_dc,
+        new_features_rest,
+        new_opacities,
+        new_scaling,
+        new_rotation,
     ):
         d = {
             "xyz": new_xyz,
@@ -560,8 +559,10 @@ class GaussianModel:
             torch.max(self.scaling, dim=1).values <= self.percent_dense * scene_extent,
         )
         scale_points = selected_pts_mask.sum() - gradient_points
-        logger.trace(f"densified points: {selected_pts_mask.sum()}, including gradient-based {gradient_points} "
-                     f"and scale-based {-scale_points}")
+        logger.trace(
+            f"densified points: {selected_pts_mask.sum()}, including gradient-based {gradient_points} "
+            f"and scale-based {-scale_points}"
+        )
 
         new_xyz = self._xyz[selected_pts_mask]
         new_features_dc = self._features_dc[selected_pts_mask]
@@ -580,7 +581,14 @@ class GaussianModel:
         )
 
     @torch.no_grad()
-    def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size, opacity_percentage: float = None):
+    def densify_and_prune(
+        self,
+        max_grad,
+        min_opacity,
+        extent,
+        max_screen_size,
+        opacity_percentage: float = None,
+    ):
         grads = self.xyz_gradient_accum / self.denom
         grads[grads.isnan()] = 0.0
         if int(get_gpu_memory()) > 250:

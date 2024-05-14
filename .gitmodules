@@ -13,3 +13,6 @@
 [submodule "submodules/icomma-diff-gaussian-rasterization"]
 	path = submodules/icomma-diff-gaussian-rasterization
 	url = https://github.com/jizongFox/icomma-diff-gaussian-rasterization.git
+[submodule "submodules/gsplat-pytorch"]
+	path = submodules/gsplat-pytorch
+	url = https://github.com/Mxbonn/gsplat-pytorch.git

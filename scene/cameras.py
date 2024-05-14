@@ -14,10 +14,18 @@ import typing as t
 from jaxtyping import Float
 from torch import nn, Tensor
 
+from gaussian_renderer.finetune_utils import initialize_quat_delta, quat2rotation
 from utils.graphics_utils import (
-    getWorld2View2,
     getProjectionMatrixShift,
+    getWorld2View_torch,
 )
+
+context: str | None = None
+
+
+def set_context(ctx: str):
+    global context
+    context = ctx
 
 
 class Camera(nn.Module):
@@ -63,22 +71,15 @@ class Camera(nn.Module):
 
         self.uid = uid
         self.colmap_id = colmap_id
-        self.R = R
-        self.T = T
+        self.R = R.astype(np.float32)
+        self.T = T.astype(np.float32)
         self.FoVx = FoVx
         self.FoVy = FoVy
         self.cx: float = cx
         self.cy: float = cy
         self.image_name = image_name
 
-        try:
-            self.data_device = torch.device(data_device)
-        except Exception as e:
-            print(e)
-            print(
-                f"[Warning] Custom device {data_device} failed, fallback to default cuda device"
-            )
-            self.data_device = torch.device("cuda")
+        self.data_device = torch.device(data_device)
 
         self.original_image = image.clamp(0.0, 1.0).to(self.data_device)
         self.image_width = self.original_image.shape[2]
@@ -92,78 +93,95 @@ class Camera(nn.Module):
             )
 
         self.zfar = 100.0
-        self.znear = 0.01
+        self.znear = 0.0000001
 
         self.trans = trans
         self.scale = scale
         self.focal_x = focal_x
         self.focal_y = focal_y
 
+        enable_delta: bool = False
+        if context == "icomma":
+            enable_delta: bool = True
+
+        # add delta
+        self.delta_quat: Float[Tensor, "1 4"] = nn.Parameter(
+            initialize_quat_delta(1, device=data_device),
+            requires_grad=enable_delta,
+        )
+        self.delta_t: Float[Tensor, "1 3"] = nn.Parameter(
+            torch.zeros(1, 3, device=data_device),
+            requires_grad=enable_delta,
+        )
+        #
         # to ndc matrix?
         # todo: this is to change where we take consideration of cx and cy
-        self._projection_matrix = (
-            getProjectionMatrixShift(
-                znear=self.znear,
-                zfar=self.zfar,
-                fovX=self.FoVx,
-                fovY=self.FoVy,
-                focal_x=self.focal_x,
-                focal_y=self.focal_y,
-                cx=self.cx,
-                cy=self.cy,
-                width=self.image_width,
-                height=self.image_height,
-            )
-            .transpose(0, 1)
-            .cuda()
-        )
-        # TODO _projection_matrix is the P matrix with transpose (P^{T}).
 
-        self.world_view_transform = (
-            torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).cuda()
-        )
-        # todo  world_view_transform records the w2c matrix with transpose (w2c^{T}).
-
-        self.full_proj_transform = (
-            self.world_view_transform.unsqueeze(0).bmm(
-                self._projection_matrix.unsqueeze(0)
-            )
-        ).squeeze(0)
-        # this means (proj@world2cam)^{T}, should be left multiplied with the xyz.
-
-        self.cam2world = torch.inverse(
-            torch.tensor(getWorld2View2(R, T, trans, scale))
-        ).cuda()
         # self.world2cam = torch.tensor(getWorld2View2(R, T, trans, scale))
-        self.camera_center = self.cam2world[:3, 3].cuda()
 
     def extra_repr(self) -> str:
         return (
             f"name={self.image_name}, image_id={self.uid}, "
-            f"c2w={self.cam2world.cpu().numpy().tolist()}, "
+            f"c2w={self.cam2world.detach().cpu().numpy().tolist()}, "
             f"center={self.camera_center}"
         )
 
+    @property
+    def projection_matrix(self) -> Float[Tensor, "4 4"]:
+        # TODO _projection_matrix is the P matrix with transpose (P^{T}).
 
-class MiniCam:
-    def __init__(
-        self,
-        width,
-        height,
-        fovy,
-        fovx,
-        znear,
-        zfar,
-        world_view_transform,
-        full_proj_transform,
-    ):
-        self.image_width = width
-        self.image_height = height
-        self.FoVy = fovy
-        self.FoVx = fovx
-        self.znear = znear
-        self.zfar = zfar
-        self.world_view_transform = world_view_transform
-        self.full_proj_transform = full_proj_transform
-        view_inv = torch.inverse(self.world_view_transform)
-        self.camera_center = view_inv[3][:3]
+        return getProjectionMatrixShift(
+            znear=self.znear,
+            zfar=self.zfar,
+            fovX=self.FoVx,
+            fovY=self.FoVy,
+            focal_x=self.focal_x,
+            focal_y=self.focal_y,
+            cx=self.cx,
+            cy=self.cy,
+            width=self.image_width,
+            height=self.image_height,
+            device=self.data_device,
+        ).transpose(0, 1)
+
+    @property
+    def world_view_transform(self) -> Float[Tensor, "4 4"]:
+        # todo  world_view_transform records the w2c matrix with transpose (w2c^{T}).
+
+        R_new = quat2rotation(self.delta_quat)[0] @ torch.tensor(
+            self.R, device=self.data_device
+        )
+        T_new = torch.tensor(self.T, device=self.data_device) + self.delta_t
+        return getWorld2View_torch(R_new, T_new).transpose(0, 1)
+
+    @property
+    def cam2world(self) -> Float[Tensor, "4 4"]:
+        return torch.inverse(self.world_view_transform.transpose(0, 1))
+
+    @property
+    def camera_center(self):
+        return self.cam2world[:3, 3].cuda()
+
+    @property
+    def cam2world_ori(self) -> Float[Tensor, "4 4"]:
+        return torch.inverse(self.world_view_transform_ori.transpose(0, 1))
+
+    @property
+    def world_view_transform_ori(self) -> Float[Tensor, "4 4"]:
+        R = torch.tensor(self.R, device=self.data_device)
+        T = torch.tensor(self.T, device=self.data_device)
+        return getWorld2View_torch(R, T).transpose(0, 1)
+
+    @property
+    def full_proj_transform(self) -> Float[Tensor, "4 4"]:
+        # this means (proj@world2cam)^{T}, should be left multiplied with the xyz.
+
+        return (
+            self.world_view_transform.unsqueeze(0).bmm(
+                self.projection_matrix.unsqueeze(0)
+            )
+        ).squeeze(0)
+
+    @property
+    def image_id(self) -> int:
+        return self.uid

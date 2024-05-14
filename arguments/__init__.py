@@ -119,6 +119,27 @@ class OptimizationFinetuneParams(ParamGroup):
         super().__init__(parser, "Optimization Parameters")
 
 
+class ICommaOptimizationParams(ParamGroup):
+    def __init__(self, parser):
+        self.iterations = 15_000
+        self.position_lr_init = 0.00000
+        self.position_lr_final = 0.000000016
+        self.position_lr_delay_mult = 0.01
+        self.position_lr_max_steps = 30_000
+        self.feature_lr = 0.0025
+        self.opacity_lr = 0.05
+        self.scaling_lr = 0.00005
+        self.rotation_lr = 0.0005
+        self.percent_dense = 0.01  # this is to reduce the size of the eclipse
+        self.lambda_dssim = 0.2
+        self.densification_interval = 500
+        self.opacity_reset_interval = 500000000
+        self.densify_from_iter = 4000
+        self.densify_until_iter = 12_000
+        self.densify_grad_threshold = 0.00001  # this is to split more
+        super().__init__(parser, "Optimization Parameters")
+
+
 def get_combined_args(parser: ArgumentParser):
     cmdlne_string = sys.argv[1:]
     cfgfile_string = "Namespace()"

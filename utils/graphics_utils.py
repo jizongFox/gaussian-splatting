@@ -58,6 +58,14 @@ def getWorld2View2(
     return Rt.astype(np.float32)  # type: ignore
 
 
+def getWorld2View_torch(R, t):
+    Rt = torch.zeros(4, 4, device=R.device, dtype=R.dtype)
+    Rt[:3, :3] = R.t()
+    Rt[:3, 3] = t
+    Rt[3, 3] = 1.0
+    return Rt
+
+
 def getProjectionMatrix(*, znear, zfar, fovX, fovY, **kwargs):
     """
     todo: normalized device coordinates?
@@ -105,7 +113,18 @@ def getProjectionMatrix(*, znear, zfar, fovX, fovY, **kwargs):
 
 
 def getProjectionMatrixShift(
-    *, znear, zfar, focal_x, focal_y, cx, cy, width, height, fovX, fovY
+    *,
+    znear,
+    zfar,
+    focal_x,
+    focal_y,
+    cx,
+    cy,
+    width,
+    height,
+    fovX,
+    fovY,
+    device: str | torch.device
 ):
     # fov is a report between the pixel and the true z focal length in meter.
     tanHalfFovY = math.tan((fovY / 2))
@@ -129,7 +148,7 @@ def getProjectionMatrixShift(
     right = right + offset_x
     bottom = bottom + offset_y
 
-    P = torch.zeros(4, 4)
+    P = torch.zeros(4, 4, device=device)
 
     z_sign = 1.0
 

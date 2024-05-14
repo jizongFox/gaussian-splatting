@@ -6,8 +6,10 @@ from jaxtyping import Float
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from scene.cameras import Camera
 from utils.graphics_utils import getWorld2View2
+
+if t.TYPE_CHECKING:
+    from scene.cameras import Camera
 
 
 def quat2rotation(r: Float[Tensor, "batch 4"]) -> Float[Tensor, "batch 3 3"]:
@@ -128,7 +130,7 @@ def multiply_quaternions(q: torch.Tensor, r: torch.Tensor) -> torch.Tensor:
     return torch.stack((w, x, y, z), dim=-1)
 
 
-def viewpoint2cw(viewpoint: Camera):
+def viewpoint2cw(viewpoint: "Camera"):
     W2C = getWorld2View2(viewpoint.R, viewpoint.T)
     C2W = np.linalg.inv(W2C)
     return C2W
@@ -142,7 +144,7 @@ def initialize_pose_delta(num_images, device):
     return torch.zeros(num_images, 3, device=device)
 
 
-def initialize_quat_delta(num_images, device):
+def initialize_quat_delta(num_images: int, device) -> Float[Tensor, "batch 4"]:
     R = torch.eye(3, device=device).unsqueeze(0).repeat(num_images, 1, 1)
     quat_result = rotation2quat(R)
     assert quat2rotation(quat_result).allclose(R)
