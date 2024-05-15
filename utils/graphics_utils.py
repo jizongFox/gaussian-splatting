@@ -66,7 +66,9 @@ def getWorld2View_torch(R, t):
     return Rt
 
 
-def getProjectionMatrix(*, znear, zfar, fovX, fovY, **kwargs):
+def getProjectionMatrix(
+    *, znear, zfar, fovX, fovY, device: str | torch.device = "cuda", **kwargs
+):
     """
     todo: normalized device coordinates?
     GPT4:
@@ -98,7 +100,7 @@ def getProjectionMatrix(*, znear, zfar, fovX, fovY, **kwargs):
     right = tanHalfFovX * znear
     left = -right
 
-    P = torch.zeros(4, 4)
+    P = torch.zeros(4, 4, device=device)
 
     z_sign = 1.0
 

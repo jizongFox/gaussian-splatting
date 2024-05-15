@@ -120,6 +120,7 @@ def render(
         geomBuffer,
         binningBuffer,
         imgBuffer,
+        accum_alphas,
     ) = rasterizer(
         means3D=means3D,
         means2D=means2D,
@@ -142,4 +143,5 @@ def render(
         "geomBuffer": geomBuffer,
         "binningBuffer": binningBuffer,
         "imgBuffer": imgBuffer,
+        "accum_alphas": accum_alphas,
     }

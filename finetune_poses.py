@@ -20,7 +20,7 @@ from argparse import ArgumentParser
 from loguru import logger
 from pathlib import Path
 from random import randint
-from torch import nn
+from torch import nn, Tensor
 from torch.nn import functional as F
 from tqdm import tqdm
 
@@ -170,11 +170,12 @@ def training(
             override_quat=_rotations,
         )
 
-        image, viewspace_point_tensor, visibility_filter, radii = (
+        image, viewspace_point_tensor, visibility_filter, radii, accum_alphas = (
             render_pkg["render"],
             render_pkg["viewspace_points"],
             render_pkg["visibility_filter"],
             render_pkg["radii"],
+            render_pkg["accum_alphas"],
         )
         cur_cxcy = cxcy(cur_camera_id)
         cur_fxfy_delta = fxfy(cur_camera_id)
@@ -186,6 +187,16 @@ def training(
             fx_delta=cur_fxfy_delta[0][None, ...],
             fy_delta=cur_fxfy_delta[1][None, ...],
         )[0]
+        accum_alphas = apply_affine(
+            accum_alphas[None, None, ...],
+            cur_cxcy[0][None, ...],
+            cur_cxcy[1][None, ...],
+            padding_value=0,
+            fx_delta=cur_fxfy_delta[0][None, ...],
+            fy_delta=cur_fxfy_delta[1][None, ...],
+        )[0]
+
+        accum_alpha_mask = t.cast(Tensor, accum_alphas > 0.5).float()
 
         image_name = viewpoint_cam.image_name
         if args.mask_dir is not None:
@@ -212,6 +223,9 @@ def training(
         gt_image = viewpoint_cam.original_image.cuda()
         gt_image = gt_image * mask_torch
         image = image * mask_torch
+
+        gt_image = gt_image * accum_alpha_mask
+        image = image * accum_alpha_mask
 
         Ll1 = l1_loss(
             image,

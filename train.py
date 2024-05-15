@@ -110,14 +110,14 @@ def training(
             bg_color=background,
             scaling_modifier=1.0,
         )
-        image, viewspace_point_tensor, visibility_filter, radii = (
+        image, viewspace_point_tensor, visibility_filter, radii, accum_alphas = (
             render_pkg["render"],
             render_pkg["viewspace_points"],
             render_pkg["visibility_filter"],
             render_pkg["radii"],
+            render_pkg["accum_alphas"],
         )
 
-        report_shape(image.shape)
         image_name = viewpoint_cam.image_name
         if args.mask_dir is not None:
             mask_path = Path(args.mask_dir) / f"{image_name}.png.png"
