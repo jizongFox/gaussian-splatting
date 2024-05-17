@@ -16,7 +16,6 @@ import torch
 import yaml
 from PIL import Image
 from argparse import ArgumentParser
-from functools import lru_cache
 from loguru import logger
 from pathlib import Path
 from random import randint
@@ -26,15 +25,11 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 from gaussian_renderer import ori_render as render
 from scene import Scene, GaussianModel
 from scene.dataset_readers import _preload  # noqa
+from utils.debug_utils import dump_image, personalized_loss
 from utils.general_utils import safe_state
 from utils.loss_utils import (
     l1_loss,
-    ssim,
-    l2_loss,
-    tv_loss,
     Entropy,
-    hsv_color_space_loss,
-    yiq_color_space_loss,
 )
 from utils.system_utils import get_hash
 from utils.train_utils import training_report, prepare_output_and_logger
@@ -42,11 +37,6 @@ from utils.train_utils import training_report, prepare_output_and_logger
 _preload()
 
 TENSORBOARD_FOUND = True
-
-
-@lru_cache()
-def report_shape(image_shape):
-    logger.info(f"image shape: {image_shape}")
 
 
 def training(
@@ -119,6 +109,9 @@ def training(
         )
 
         image_name = viewpoint_cam.image_name
+
+        dump_image(image_name, image, args, viewpoint_cam)
+
         if args.mask_dir is not None:
             mask_path = Path(args.mask_dir) / f"{image_name}.png.png"
             with Image.open(mask_path) as fmask:
@@ -141,102 +134,7 @@ def training(
             gt_image,
         )
 
-        # jizong test
-        if args.loss_config is not None:
-            if args.loss_config == "naive":
-                loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
-                    1.0
-                    - ssim(
-                        image,
-                        gt_image,
-                    )
-                )
-            elif args.loss_config == "l1":
-                loss = Ll1
-            elif args.loss_config == "l2":
-                loss = l2_loss(image, gt_image, masks=mask_torch)
-            elif args.loss_config == "ssim":
-                loss = 1.0 - ssim(
-                    image,
-                    gt_image,
-                )
-            elif args.loss_config == "ssim_21":
-                loss = 1.0 - ssim(
-                    image,
-                    gt_image,
-                    window_size=21,
-                )
-            elif args.loss_config == "ssim_5":
-                loss = 1.0 - ssim(
-                    image,
-                    gt_image,
-                    window_size=5,
-                )
-            elif args.loss_config == "tv":
-                loss = tv_loss(image[None, ...], gt_image[None, ...])
-            elif args.loss_config == "ssim+hsv":
-                loss = 0.8 * (
-                    1.0
-                    - ssim(
-                        image,
-                        gt_image,
-                    )
-                ) + 0.2 * hsv_color_space_loss(
-                    image[None, ...], gt_image[None, ...], channel_weight=(0.5, 1, 0.1)
-                )
-            elif args.loss_config == "hsv":
-                loss = hsv_color_space_loss(
-                    image[None, ...], gt_image[None, ...], channel_weight=(0.5, 1, 0.1)
-                )
-
-            elif args.loss_config == "yiq":
-                loss = yiq_color_space_loss(
-                    image[None, ...], gt_image[None, ...], channel_weight=(0.1, 1, 1)
-                )
-
-            elif args.loss_config == "ssim+yiq":
-                loss = 0.8 * (
-                    1.0
-                    - ssim(
-                        image,
-                        gt_image,
-                    )
-                ) + 0.2 * yiq_color_space_loss(
-                    image[None, ...], gt_image[None, ...], channel_weight=(0.1, 1, 1)
-                )
-
-            elif args.loss_config == "ssim+yiq+":
-                loss = 0.5 * (
-                    1.0
-                    - ssim(
-                        image,
-                        gt_image,
-                    )
-                ) + 0.5 * yiq_color_space_loss(
-                    image[None, ...], gt_image[None, ...], channel_weight=(0.05, 1, 1)
-                )
-            elif args.loss_config == "ssim-mres+yiq+":
-                loss = (
-                    0.2 * (1.0 - ssim(image, gt_image, window_size=11))
-                    + 0.2 * (1.0 - ssim(image, gt_image, window_size=5))
-                    + 0.2 * (1.0 - ssim(image, gt_image, window_size=21))
-                    + 0.4
-                    * yiq_color_space_loss(
-                        image[None, ...],
-                        gt_image[None, ...],
-                        channel_weight=(0.01, 1, 0.35),
-                    )
-                )
-            else:
-                raise NotImplementedError(args.loss_config)
-        else:
-            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
-                1.0
-                - ssim(
-                    image,
-                    gt_image,
-                )
-            )
+        loss = personalized_loss(args, opt, Ll1, image, gt_image, mask_torch)
 
         loss = loss
 
