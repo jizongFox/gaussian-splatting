@@ -16,3 +16,6 @@
 [submodule "submodules/gsplat-pytorch"]
 	path = submodules/gsplat-pytorch
 	url = https://github.com/Mxbonn/gsplat-pytorch.git
+[submodule "submodules/diff-gaussian-rasterization-w-pose-depth"]
+	path = submodules/diff-gaussian-rasterization-w-pose-depth
+	url = https://github.com/jizongFox/gaussian_rasterizer.git
