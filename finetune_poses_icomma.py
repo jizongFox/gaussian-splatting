@@ -21,7 +21,7 @@ from itertools import chain
 from loguru import logger
 from pathlib import Path
 from random import randint
-from torch import nn
+from torch import nn, Tensor
 from tqdm import tqdm
 
 from arguments import (
@@ -32,18 +32,20 @@ from arguments import (
 from gaussian_renderer import icomma_render
 from gaussian_renderer.finetune_utils import (
     apply_affine,
+    GradLayer,
 )
 from scene import Scene, GaussianModel, Camera
 from scene.cameras import set_context
 from scene.dataset_readers import _preload  # noqa
 from utils.general_utils import safe_state
-from utils.loss_utils import l1_loss, ssim, Entropy
+from utils.loss_utils import l1_loss, Entropy
 from utils.system_utils import get_hash
 from utils.train_utils import prepare_output_and_logger
 
 _preload()
 
 TENSORBOARD_FOUND = True
+sober_filter = GradLayer().cuda()
 
 
 def training(
@@ -92,7 +94,7 @@ def training(
     cxcy.weight.data = nn.Parameter(
         torch.zeros_like(cxcy.weight.data), requires_grad=args.activate_pose_grad
     )
-    cxcy_optimizer = torch.optim.Adam(cxcy.parameters(), lr=0e-5)
+    cxcy_optimizer = torch.optim.Adam(cxcy.parameters(), lr=2e-5)
     cxcy_scheduler = torch.optim.lr_scheduler.StepLR(
         cxcy_optimizer, step_size=opt.iterations // 4, gamma=0.1
     )
@@ -101,7 +103,10 @@ def training(
     fxfy.weight.data = nn.Parameter(
         torch.zeros_like(cxcy.weight.data), requires_grad=args.activate_pose_grad
     )
-    fxfy_optimizer = torch.optim.Adam(fxfy.parameters(), lr=0e-6)
+    fxfy_optimizer = torch.optim.Adam(fxfy.parameters(), lr=2e-5)
+    fxfy_scheduler = torch.optim.lr_scheduler.StepLR(
+        fxfy_optimizer, step_size=opt.iterations // 4, gamma=0.1
+    )
 
     first_iter += 1
 
@@ -132,11 +137,12 @@ def training(
             bg_color=background,
         )
 
-        image, viewspace_point_tensor, visibility_filter, radii = (
+        image, viewspace_point_tensor, visibility_filter, radii, accum_alphas = (
             render_pkg["render"],
             render_pkg["viewspace_points"],
             render_pkg["visibility_filter"],
             render_pkg["radii"],
+            render_pkg["accum_alphas"],
         )
         cur_cxcy = cxcy(cur_camera_id)
         cur_fxfy_delta = fxfy(cur_camera_id)
@@ -148,6 +154,16 @@ def training(
             fx_delta=cur_fxfy_delta[0][None, ...],
             fy_delta=cur_fxfy_delta[1][None, ...],
         )[0]
+        accum_alphas = apply_affine(
+            accum_alphas[None, None, ...],
+            cur_cxcy[0][None, ...],
+            cur_cxcy[1][None, ...],
+            padding_value=0,
+            fx_delta=cur_fxfy_delta[0][None, ...],
+            fy_delta=cur_fxfy_delta[1][None, ...],
+        )[0]
+
+        accum_alpha_mask = t.cast(Tensor, accum_alphas > 0.5).float()
 
         image_name = viewpoint_cam.image_name
         if args.mask_dir is not None:
@@ -174,6 +190,9 @@ def training(
         gt_image = viewpoint_cam.original_image.cuda()
         gt_image = gt_image * mask_torch
         image = image * mask_torch
+
+        gt_image = gt_image * accum_alpha_mask
+        image = image * accum_alpha_mask
 
         Ll1 = l1_loss(
             image,
@@ -230,13 +249,10 @@ def training(
             )
             diff_pil.save(save_path)
 
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (
-            1.0
-            - ssim(
-                image,
-                gt_image,
-            )
+        loss = Ll1 + l1_loss(
+            sober_filter(image[None, ...]), sober_filter(gt_image[None, ...])
         )
+
         # loss += l1_loss(
         #     sober_filter(image[None, ...]), sober_filter(gt_image[None, ...])
         # )
@@ -279,10 +295,15 @@ def training(
         pose_optimizer.zero_grad(set_to_none=True)
         pose_scheduler.step()
 
+        fxfy_scheduler.step()
+
         if iteration in checkpoint_iterations:
             camera_poses_state = {
                 x.image_id: x.state_dict() for x in scene.getTrainCameras()
             }
+            camera_poses_state.update(
+                {"fxfy": fxfy.state_dict(), "cxcy": cxcy.state_dict()}
+            )
             torch.save(
                 camera_poses_state,
                 Path(scene.model_path) / f"camera_poses_{iteration:08d}.pth",

@@ -109,7 +109,16 @@ def render(
         colors_precomp = override_color
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen).
-    rendered_image, radii = rasterizer(
+
+    (
+        color,
+        radii,
+        num_rendered,
+        geomBuffer,
+        binningBuffer,
+        imgBuffer,
+        accum_alphas,
+    ) = rasterizer(
         means3D=means3D,
         means2D=means2D,
         shs=shs,
@@ -125,8 +134,13 @@ def render(
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
     return {
-        "render": rendered_image,
+        "render": color,
         "viewspace_points": screenspace_points,
         "visibility_filter": radii > 0,
         "radii": radii,
+        "num_rendered": num_rendered,
+        "accum_alphas": accum_alphas,
+        "geomBuffer": geomBuffer,
+        "binningBuffer": binningBuffer,
+        "imgBuffer": imgBuffer,
     }
