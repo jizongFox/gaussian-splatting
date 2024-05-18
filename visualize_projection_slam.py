@@ -1,11 +1,72 @@
+import json
 import math
 import matplotlib.pyplot as plt
 import numpy as np
 import open3d
+import torch
 from dataclasses import dataclass
 from loguru import logger
+from pathlib import Path
 
-cloud_name = "/home/jizong/Workspace/dConstruct/nerfstudio/data/flower/colmap/sparse/0/point3d.ply"
+from nerfstudio.scripts.dctoolbox.utils import quat2rotation
+
+# S from opencv to slam convention
+S = np.array([[-1, 0, 0, 0], [0, 0, -1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=float)
+
+
+def load_meta_poses(meta_json: Path | str):
+    with open(meta_json) as f:
+        data = json.load(f)
+
+    data = data["data"]
+    image_poses = {}
+
+    for i, d in enumerate(data):
+        image_path_ = d["imgName"]
+        for k, v in image_path_.items():
+            px = d["worldTcam"][k]["px"]
+            py = d["worldTcam"][k]["py"]
+            pz = d["worldTcam"][k]["pz"]
+            qw = d["worldTcam"][k]["qw"]
+            qx = d["worldTcam"][k]["qx"]
+            qy = d["worldTcam"][k]["qy"]
+            qz = d["worldTcam"][k]["qz"]
+            R = np.zeros((4, 4))
+            qvec = np.array([qw, qx, qy, qz])
+            norm = np.linalg.norm(qvec)
+            qvec /= norm
+            R[:3, :3] = quat2rotation(torch.from_numpy(qvec).float()[None, ...])[0]
+            R[:3, 3] = np.array([px, py, pz])
+            R[3, 3] = 1.0
+            # assert np.linalg.det(R[:3, :3]) == 1
+            # todo: check if normalized. If not, normalize it.
+            # Q, T = SE3_to_quaternion_and_translation_torch(torch.from_numpy(R).unsqueeze(0).double())
+            # assert torch.allclose(Q.float(), torch.from_numpy(qvec).float(), rtol=1e-3, atol=1e-3), (
+            #     Q.float(), torch.from_numpy(qvec).float())
+            # assert torch.allclose(T.float(), torch.from_numpy([px, py, pz]).float(), rtol=1e-3, atol=1e-3)
+            # here the world coordinate is defined in robotics space, where z is up, x is left and y is right.
+            # the camera coordinate is defined in opencv convention, where the camera is looking down the z axis,
+            # y is down and x is right.
+
+            # convert the world coordinate to camera coordinate.
+            R = S.T.dot(R)  # this is the c2w in opencv convention.
+
+            image_poses[v] = R
+
+    return image_poses
+
+
+def from_opencv2slam(points: np.ndarray) -> np.ndarray:
+
+    return np.einsum("ij,bj->bi", S, points)
+
+
+def from_slam2opencv(points: np.ndarray) -> np.ndarray:
+    S = np.array(
+        [[-1, 0, 0, 0], [0, 0, -1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=float
+    )
+
+    return np.einsum("ij,bj->bi", S.T, points)
 
 
 def clip_near_far(
@@ -83,7 +144,13 @@ class Intrinsic:
         opengl_projection_mtx = np.array(
             [
                 [2 * self.f / self.w, 0.0, (self.w - 2 * self.cx) / self.w, 0.0],
-                [0.0, 2 * self.f / self.h, (self.h - 2 * self.cy) / self.h, 0.0],
+                [
+                    0.0,
+                    2 * self.f / self.h,
+                    (self.h - 2 * (self.h - self.cy))
+                    / self.h,  # convention changes for cx and cy
+                    0.0,
+                ],
                 [
                     0.0,
                     0.0,
@@ -174,6 +241,7 @@ def plot3D_pointcloud(pcd: np.ndarray):
         "c": ["red"] * batch_size,
     }
     fig = px.scatter_3d(data, x="x", y="y", z="z", size="size", color="c")
+    fig.update_layout(scene=dict(aspectmode="data"))
     fig.show()
 
 
@@ -181,7 +249,7 @@ def load_pointcloud(filename: str) -> np.ndarray:
     pointcloud = open3d.io.read_point_cloud(filename)
 
     pointcloud_np = np.array(pointcloud.points)
-    pointcloud_np = pointcloud_np[np.linalg.norm(pointcloud_np, axis=-1) < 2]
+    pointcloud_np = pointcloud_np[np.linalg.norm(pointcloud_np, axis=-1) < 200]
     return np.hstack(
         [
             pointcloud_np,
@@ -210,17 +278,46 @@ def load_pointcloud(filename: str) -> np.ndarray:
 
 # Note: we obtain the same result with this:
 # (that's what cv2.projectPoints basically does: multiply points with camera matrix and then divide result by z coord)
+cloud_name = "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/korea_accoms_outside.ply"
+meta_file = "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/meta_updated.json"
+
 logger.info("Also computed from matrix multiplication")
 pointcloud_np_homo = load_pointcloud(filename=cloud_name)
-camera = Intrinsic(h=800, w=800, near=1, far=5, fov_degree=90)
-c2w = Camera2World(
-    R=np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]), t=np.array([0, 0, -2])
-)
+
+pointcloud_np_homo = from_slam2opencv(pointcloud_np_homo)
+# plot3D_pointcloud(pointcloud_np_homo)
+
+poses = load_meta_poses(meta_file)
+
+camera_poses = np.stack([x[:3, 3] for x in poses.values()])
+#
+# pcd = pointcloud_np_homo[::20]
+# batch_size = pcd.shape[0]
+# data = {
+#     "x": pcd[:, 0],
+#     "y": pcd[:, 1],
+#     "z": pcd[:, 2],
+#     "size": np.ones_like(pcd[:, 0]) * 1,
+#     "c": ["red"] * batch_size,
+# }
+# fig = px.scatter_3d(pd.DataFrame(data), x="x", y="y", z="z", size="size", color="c")
+# fig.update_layout(scene=dict(aspectmode="data"))
+# fig2 = px.scatter_3d(pd.DataFrame(camera_poses, columns=[*"xyz"]), x="x", y="y", z="z")
+# fig2.update_layout(scene=dict(aspectmode="data"))
+# import plotly.graph_objects as go
+#
+# big_fig = go.Figure([fig.data[0], fig2.data[0]])
+# big_fig.show()
+poses = load_meta_poses(meta_file)
+camera = Intrinsic(h=800, w=800, near=1, far=500, fov_degree=90, cx=500, cy=500)
+
+cur_pose = poses["img_DECXIN2023012347_1117.png"]
+c2w = Camera2World(R=cur_pose[:3, :3], t=cur_pose[:3, 3])
+print(c2w)
 
 xyz_camera = np.einsum("ij,bj->bi", c2w.to_world2camera().extrinsic, pointcloud_np_homo)
 xyz_camera = clip_near_far(xyz_camera, near=camera.near, far=camera.far)
 plot3D_pointcloud(xyz_camera)
-
 pinhole_uvw = np.einsum("ij,nj->ni", camera.pinhole_camera_matrix, xyz_camera)
 
 pinhole_uv = pinhole_uvw[:, :2] / pinhole_uvw[:, -1:]

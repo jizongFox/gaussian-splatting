@@ -163,7 +163,7 @@ class GaussianModel:
             distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()),
             0.0000001,
         )
-        dist2 = torch.clamp(dist2, 0.0000001, 0.003)
+`        dist2 = torch.clamp(dist2, 0.0000001, 0.0003)
         scales = torch.log(torch.sqrt(dist2 / 3))[..., None].repeat(1, 3)
         rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
         rots[:, 0] = 1
