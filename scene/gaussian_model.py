@@ -145,7 +145,9 @@ class GaussianModel:
     def is_max_sh(self):
         return self.active_sh_degree == self.max_sh_degree
 
-    def create_from_pcd(self, pcd: BasicPointCloud, spatial_lr_scale: float):
+    def create_from_pcd(
+        self, pcd: BasicPointCloud, spatial_lr_scale: float, max_sphere: float = 1e-3
+    ):
         self.spatial_lr_scale = spatial_lr_scale
         fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
         fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
@@ -163,7 +165,7 @@ class GaussianModel:
             distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()),
             0.0000001,
         )
-`        dist2 = torch.clamp(dist2, 0.0000001, 0.0003)
+        dist2 = torch.clamp(dist2, 0.0000001, max_sphere)
         scales = torch.log(torch.sqrt(dist2 / 3))[..., None].repeat(1, 3)
         rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
         rots[:, 0] = 1

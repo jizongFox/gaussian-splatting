@@ -432,7 +432,7 @@ def readSlamSceneInfo(
     image_dir,
     eval,
     llffhold=8,
-):
+) -> SceneInfo:
     assert Path(json_path).exists(), f"Path {json_path} does not exist."
 
     cam_intrinsics, cam_extrinsics = _read_slam_intrinsic_and_extrinsic(

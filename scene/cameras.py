@@ -52,8 +52,8 @@ class Camera(nn.Module):
         Camera class for storing camera information and image data.
 
         :param colmap_id: Camera ID in COLMAP
-        :param R: Rotation matrix
-        :param T: Translation vector
+        :param R: Rotation matrix in c2w
+        :param T: Translation vector in w2c
         :param FoVx: Field of view in x direction
         :param FoVy: Field of view in y direction
         :param cx: Principal point in x direction
@@ -151,7 +151,29 @@ class Camera(nn.Module):
         R_new = quat2rotation(self.delta_quat)[0] @ torch.tensor(
             self.R, device=self.data_device
         )
+
+        t_new = (
+            quat2rotation(self.delta_quat)[0] @ self.cam2world_ori[:3, 3] + self.delta_t
+        )  # camtoworld_translation
+
+        new_matrix = torch.zeros(4, 4, device=self.data_device)
+        new_matrix[:3, :3] = R_new
+        new_matrix[:3, 3] = t_new
+        new_matrix[3, 3] = 1.0
+        return new_matrix.inverse().transpose(0, 1)
+
+    @property
+    def world_view_transform_old_method(self) -> Float[Tensor, "4 4"]:
+        # todo  world_view_transform records the w2c matrix with transpose (w2c^{T}).
+
+        R_new = quat2rotation(self.delta_quat)[0] @ torch.tensor(
+            self.R, device=self.data_device
+        )
         T_new = torch.tensor(self.T, device=self.data_device) + self.delta_t
+
+        # R_new is the c2w matrix with delta rotation.
+        # T_new is the w2c matrix with delta translation.
+        # return getWorld2View_torch(R_new, T_new).transpose(0, 1)
         return getWorld2View_torch(R_new, T_new).transpose(0, 1)
 
     @property

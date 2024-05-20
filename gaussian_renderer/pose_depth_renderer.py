@@ -13,7 +13,7 @@ import torch
 import typing
 from torch import Tensor
 
-from icomma_diff_gaussian_rasterization import (
+from diff_gaussian_rasterization_w_pose_depth import (
     GaussianRasterizationSettings,
     GaussianRasterizer,
 )
@@ -31,7 +31,6 @@ def render(
     bg_color: torch.Tensor,
     scaling_modifier: float = 1.0,
     override_color: Tensor = None,
-    compute_grad_cov2d: bool = True,
     compute_cov3D_python: bool = False,
     convert_SHs_python: bool = False,
 ):
@@ -65,7 +64,6 @@ def render(
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
         debug=False,
-        compute_grad_cov2d=compute_grad_cov2d,
         proj_k=viewpoint_camera.projection_matrix,
     )
 
@@ -112,15 +110,7 @@ def render(
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen).
 
-    (
-        color,
-        radii,
-        num_rendered,
-        geomBuffer,
-        binningBuffer,
-        imgBuffer,
-        accum_alphas,
-    ) = rasterizer(
+    (color, depth, alpha, radii) = rasterizer(
         means3D=means3D,
         means2D=means2D,
         shs=shs,
@@ -137,12 +127,9 @@ def render(
     # They will be excluded from value updates used in the splitting criteria.
     return {
         "render": color,
+        "depth": depth,
         "viewspace_points": screenspace_points,
         "visibility_filter": radii > 0,
         "radii": radii,
-        "num_rendered": num_rendered,
-        "accum_alphas": accum_alphas,
-        "geomBuffer": geomBuffer,
-        "binningBuffer": binningBuffer,
-        "imgBuffer": imgBuffer,
+        "alphas": alpha,
     }

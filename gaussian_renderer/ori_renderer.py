@@ -18,14 +18,16 @@ from diff_gaussian_rasterization_ori import (
     GaussianRasterizationSettings,
     GaussianRasterizer,
 )
-from scene import Camera
-from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
+
+if t.TYPE_CHECKING:
+    from scene import Camera
+    from scene.gaussian_model import GaussianModel
 
 
 def render(
-    viewpoint_camera: Camera,
-    model: GaussianModel,
+    viewpoint_camera: "Camera",
+    model: "GaussianModel",
     *,
     bg_color: torch.Tensor,
     scaling_modifier=1.0,
