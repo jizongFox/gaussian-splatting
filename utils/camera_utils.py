@@ -21,19 +21,19 @@ from utils.graphics_utils import fov2focal
 WARNED = False
 
 
-def loadCam(args, id: int, cam_info: CameraInfo, resolution_scale) -> Camera:
+def loadCam(downsample: int, id: int, cam_info: CameraInfo, resolution_scale) -> Camera:
     if cam_info.image is None:
         cam_info.image = _read_image(cam_info.image_path)
 
     orig_w, orig_h = cam_info.image.size
 
-    if args.resolution in [1, 2, 4, 8]:
-        scale = args.resolution
-        resolution = round(orig_w / (resolution_scale * args.resolution)), round(
-            orig_h / (resolution_scale * args.resolution)
+    if downsample in [1, 2, 4, 8]:
+        scale = downsample
+        resolution = round(orig_w / (resolution_scale * downsample)), round(
+            orig_h / (resolution_scale * downsample)
         )
     else:  # should be a type that converts to float
-        if args.resolution == -1:
+        if downsample == -1:
             if orig_w > 1600:
                 global WARNED
                 if not WARNED:
@@ -46,7 +46,7 @@ def loadCam(args, id: int, cam_info: CameraInfo, resolution_scale) -> Camera:
             else:
                 global_down = 1
         else:
-            global_down = orig_w / args.resolution
+            global_down = orig_w / downsample
 
         scale = float(global_down) * float(resolution_scale)
         resolution = (int(orig_w / scale), int(orig_h / scale))
@@ -74,17 +74,18 @@ def loadCam(args, id: int, cam_info: CameraInfo, resolution_scale) -> Camera:
         gt_alpha_mask=loaded_mask,
         image_name=cam_info.image_name,
         uid=id,
-        data_device=args.data_device,
+        data_device="cuda",
         focal_x=focal_length_x,
         focal_y=focal_length_y,
     )
 
 
-def cameraList_from_camInfos(cam_infos, resolution_scale, args) -> t.List[Camera]:
+def cameraList_from_camInfos(cam_infos, resolution_scale, downscale) -> t.List[Camera]:
     # camera_list = []
     with Pool(os.cpu_count() * 2) as pool:
         camera_list = pool.starmap(
-            loadCam, [(args, x, y, resolution_scale) for x, y in enumerate(cam_infos)]
+            loadCam,
+            [(downscale, x, y, resolution_scale) for x, y in enumerate(cam_infos)],
         )
     # for id, c in enumerate(cam_infos):
     #     camera_list.append(loadCam(args, id, c, resolution_scale))

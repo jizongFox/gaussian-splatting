@@ -34,9 +34,9 @@ from gaussian_renderer.finetune_utils import (
     apply_affine,
     GradLayer,
 )
-from scene import Scene, GaussianModel, Camera
 from scene.cameras import set_context
 from scene.dataset_readers import _preload  # noqa
+from scene.scene_old import Scene, GaussianModel, Camera
 from utils.general_utils import safe_state
 from utils.loss_utils import l1_loss, Entropy
 from utils.system_utils import get_hash
@@ -59,7 +59,7 @@ def training(
     args,
 ):
     first_iter = 0
-    tb_writer = prepare_output_and_logger(dataset)
+    tb_writer = prepare_output_and_logger(args.model_path, dataset)
     gaussians = GaussianModel(dataset.sh_degree)
     if args.pcd_path is not None:
         logger.warning(f"using pcd_path = {args.pcd_path}")

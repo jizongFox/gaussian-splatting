@@ -27,10 +27,10 @@ from arguments import (
     PipelineParams,
     ICommaOptimizationParams,
 )
-from gaussian_renderer import icomma_render as render
-from scene import Scene, GaussianModel
+from gaussian_renderer import pose_depth_render
 from scene.cameras import set_context
 from scene.dataset_readers import _preload  # noqa
+from scene.scene_old import Scene, GaussianModel
 from utils.debug_utils import dump_image, personalized_loss
 from utils.general_utils import safe_state
 from utils.loss_utils import (
@@ -71,7 +71,7 @@ def training(
         for cur_camera in scene.getTrainCameras():
             cur_camera.load_state_dict(camera_poses[cur_camera.uid])
     pose_optimizer = torch.optim.Adam(
-        chain(*[x.parameters() for x in scene.getTrainCameras()]), lr=5e-5
+        chain(*[x.parameters() for x in scene.getTrainCameras()]), lr=2e-5
     )
 
     gaussians.training_setup(opt)
@@ -111,18 +111,19 @@ def training(
         # Render
         if (iteration - 1) == debug_from:
             pipe.debug = True
-        render_pkg = render(
+        render_pkg = pose_depth_render(
             viewpoint_cam,
             gaussians,
             bg_color=background,
             scaling_modifier=1.0,
         )
-        image, viewspace_point_tensor, visibility_filter, radii, accum_alphas, = (
+        image, depth, viewspace_point_tensor, visibility_filter, radii, accum_alphas = (
             render_pkg["render"],
+            render_pkg["depth"],
             render_pkg["viewspace_points"],
             render_pkg["visibility_filter"],
             render_pkg["radii"],
-            render_pkg["accum_alphas"],
+            render_pkg["alphas"],
         )
         image_name = viewpoint_cam.image_name
 
@@ -207,7 +208,7 @@ def training(
             iter_start.elapsed_time(iter_end),
             testing_iterations,
             scene,
-            render,
+            pose_depth_render,
             {"bg_color": background},
             global_args=args,
         )
@@ -271,7 +272,6 @@ if __name__ == "__main__":
     parser.add_argument("--ip", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=random.randint(3000, 65535))
     parser.add_argument("--debug_from", type=int, default=-1)
-    parser.add_argument("--detect_anomaly", action="store_true", default=False)
     parser.add_argument(
         "--test_iterations",
         nargs="+",
