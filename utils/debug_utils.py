@@ -6,7 +6,7 @@ from loguru import logger
 from pathlib import Path
 from torch import Tensor
 
-from scene import Camera
+from scene.cameras import Camera
 from utils.loss_utils import (
     ssim,
     l2_loss,

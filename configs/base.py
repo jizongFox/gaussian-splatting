@@ -37,6 +37,8 @@ class _DatasetConfig:
     remove_pcd_color: bool = False
 
     max_sphere_distance: float = 1e-3
+    force_centered_pp: bool = False
+    """ force the principal point to be centered. """
 
 
 @dataclass(kw_only=True)

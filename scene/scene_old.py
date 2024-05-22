@@ -64,6 +64,7 @@ class Scene:
                 path=args.source_path,
                 image_dir=global_args.image_dir,
                 eval_mode=args.eval,
+                force_centered_pp=global_args.force_cxcy_center,
             )
         elif global_args.meta_file is not None:
             print("Found slam file, assuming slam data set!")
@@ -71,6 +72,7 @@ class Scene:
                 json_path=global_args.meta_file,
                 image_dir=global_args.image_dir,
                 eval_mode=args.eval,
+                force_centered_pp=global_args.force_cxcy_center,
             )
 
         else:

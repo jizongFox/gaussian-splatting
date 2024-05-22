@@ -115,7 +115,9 @@ def getNerfppNorm(cam_info):
 def readColmapCameras(
     cam_extrinsics: t.Dict[int, Colmap_Image],
     cam_intrinsics: t.Dict[int, Colmap_Camera],
+    *,
     images_folder: str,
+    force_centered_pp: bool = False,
 ) -> t.List[CameraInfo]:
     cam_infos = []
     for idx, key in enumerate(cam_extrinsics):
@@ -134,19 +136,27 @@ def readColmapCameras(
         T = np.array(extr.tvec)  # here the T is not -RT, T for w2c
 
         if intr.model == "SIMPLE_PINHOLE":
-            raise UserWarning("SIMPLE_PINHOLE cameras are not supported!")
+            raise RuntimeError("SIMPLE_PINHOLE cameras are not supported!")
             focal_length_x = intr.params[0]
             FovY = focal2fov(focal_length_x, height)
             FovX = focal2fov(focal_length_x, width)
-            cx = intr.params[2]
-            cy = intr.params[3]
+            if force_centered_pp:
+                cx = width / 2
+                cy = height / 2
+            else:
+                cx = intr.params[2]
+                cy = intr.params[3]
         elif intr.model == "PINHOLE":
             focal_length_x = intr.params[0]
             focal_length_y = intr.params[1]
             FovY = focal2fov(focal_length_y, height)
             FovX = focal2fov(focal_length_x, width)
-            cx = intr.params[2]
-            cy = intr.params[3]
+            if force_centered_pp:
+                cx = width / 2
+                cy = height / 2
+            else:
+                cx = intr.params[2]
+                cy = intr.params[3]
         else:
             assert False, (
                 "Colmap camera model not handled: "
@@ -228,6 +238,7 @@ def readColmapSceneInfo(
     eval_mode: bool,
     llffhold: int = 8,
     load_pcd: bool = False,
+    force_centered_pp: bool = False,
 ):
     cam_intrinsics: t.Dict[int, Colmap_Camera]
     cam_extrinsics: t.Dict[int, Colmap_Image]
@@ -249,6 +260,7 @@ def readColmapSceneInfo(
         cam_extrinsics=cam_extrinsics,
         cam_intrinsics=cam_intrinsics,
         images_folder=image_dir,
+        force_centered_pp=force_centered_pp,
     )
     cam_infos: t.List[CameraInfo] = sorted(
         cam_infos_unsorted.copy(), key=lambda x: x.image_name
@@ -445,6 +457,7 @@ def readSlamSceneInfo(
     eval_mode: bool = True,
     llffhold=8,
     load_pcd: bool = False,
+    force_centered_pp: bool = False,
 ) -> SceneInfo:
     assert Path(json_path).exists(), f"Path {json_path} does not exist."
 
@@ -457,6 +470,7 @@ def readSlamSceneInfo(
         cam_extrinsics=cam_extrinsics,
         cam_intrinsics=cam_intrinsics,
         images_folder=image_dir,
+        force_centered_pp=force_centered_pp,
     )
     cam_infos: t.List[CameraInfo] = sorted(
         cam_infos_unsorted.copy(), key=lambda x: x.image_name

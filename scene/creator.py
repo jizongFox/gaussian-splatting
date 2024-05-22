@@ -1,7 +1,9 @@
 import json
 import os
 import random
+import torch.optim
 import typing as t
+from itertools import chain
 from loguru import logger
 from pathlib import Path
 
@@ -53,6 +55,7 @@ class Scene:
                 dataset.image_dir.as_posix(),
                 eval_mode=True,
                 load_pcd=False,
+                force_centered_pp=dataset.force_centered_pp,
             )
         elif isinstance(dataset, SlamDatasetConfig):
             scene_info = readSlamSceneInfo(
@@ -60,6 +63,7 @@ class Scene:
                 json_path=dataset.meta_file.as_posix(),
                 eval_mode=True,
                 load_pcd=False,
+                force_centered_pp=dataset.force_centered_pp,
             )
         else:
             raise ValueError("Unknown dataset type")
@@ -141,3 +145,13 @@ class Scene:
 
     def getTestCameras(self, scale=1.0) -> t.List[Camera]:
         return self.test_cameras[scale]
+
+    def pose_optimizer(self, lr: float = 1e-8) -> torch.optim.Optimizer:
+        cameras = self.getTrainCameras()
+        for cur_camera in cameras:
+            cur_camera.delta_quat.requires_grad = True
+            cur_camera.delta_t.requires_grad = True
+        pose_optimizer = torch.optim.Adam(
+            chain(*[x.parameters() for x in cameras]), lr=lr
+        )
+        return pose_optimizer
