@@ -32,7 +32,8 @@ from scene.cameras import Camera
 from scene.creator import Scene, GaussianModel
 from scene.dataset_readers import _preload  # noqa
 from utils.loss_utils import (
-    l1_loss,
+    ssim,
+    yiq_color_space_loss,
 )
 from utils.system_utils import get_hash
 from utils.train_utils import (
@@ -71,7 +72,7 @@ def densification(
             logger.trace(f"calling densify_and_prune at iteration {iteration}")
             gaussians.densify_and_prune(
                 optim_conf.densify_grad_threshold,
-                0.0001,
+                0.005,
                 scene.cameras_extent,
                 size_threshold,
             )
@@ -79,12 +80,12 @@ def densification(
         if iteration % optim_conf.opacity_reset_interval == 0:
             logger.trace("calling reset_opacity")
             gaussians.reset_opacity()
-    # else:
-    #     # after having densified the pcd, we should prune the invisibile 3d gaussians.
-    #     if iteration % 500 == 0 and optim_conf.prune_after_densification:
-    #         opacity_mask = gaussians.opacity <= 0.005
-    #         logger.trace(f"pruned {opacity_mask.sum()} points at iteration {iteration}")
-    #         gaussians.prune_points(opacity_mask.squeeze(-1))
+    else:
+        # after having densified the pcd, we should prune the invisibile 3d gaussians.
+        if iteration % 500 == 0:
+            opacity_mask = gaussians.opacity <= 0.005
+            logger.trace(f"pruned {opacity_mask.sum()} points at iteration {iteration}")
+            gaussians.prune_points(opacity_mask.squeeze(-1))
 
 
 def training(
@@ -106,8 +107,9 @@ def training(
         num_threads=6,
     )
 
-    for iteration in tqdm(range(0, config.optimizer.iterations + 1)):
+    indicator = tqdm(range(1, config.optimizer.iterations + 1))
 
+    for iteration in indicator:
         cur_camera = next(camera_iterator)
         viewpoint_cam = cur_camera["camera"]
         gt_image = cur_camera["target"]
@@ -126,12 +128,20 @@ def training(
             render_pkg["radii"],
             render_pkg["alphas"],
         )
-        accum_alpha_mask = t.cast(Tensor, accum_alphas > 0.5).float()
+        # accum_alpha_mask = t.cast(Tensor, accum_alphas > 0.5).float()
 
-        gt_image = gt_image * mask * accum_alpha_mask
-        image = image * mask * accum_alpha_mask
+        gt_image = gt_image * mask
+        image = image * mask
 
-        Ll1 = l1_loss(image, gt_image)
+        Ll1 = (1.0 - config.optimizer.lambda_dssim) * yiq_color_space_loss(
+            image[None, ...], gt_image[None, ...], channel_weight=(0.1, 1, 1)
+        ) + config.optimizer.lambda_dssim * (
+            1.0
+            - ssim(
+                image,
+                gt_image,
+            )
+        )
 
         # if iteration > opt.densify_until_iter:
         loss = Ll1
@@ -148,6 +158,10 @@ def training(
 
         for cb in end_of_iter_cbs:
             cb(iteration)
+
+        indicator.set_postfix(
+            {"loss": f"{loss.item():.4f}", "pcd": f"{len(gaussians):2e}"}
+        )
 
         if iteration in config.control.test_iterations:
             logger.info(f"Testing at iteration {iteration}")
@@ -205,7 +219,7 @@ def main(config: ExperimentConfig):
 
     pose_optimizer = scene.pose_optimizer(lr=config.optimizer.pose_lr_init)
     pose_scheduler = torch.optim.lr_scheduler.StepLR(
-        pose_optimizer, step_size=5000, gamma=0.75
+        pose_optimizer, step_size=config.iterations // 4, gamma=0.2
     )
 
     bg_color = [1, 1, 1] if config.model.white_background else [0, 0, 0]
@@ -224,7 +238,7 @@ def main(config: ExperimentConfig):
 
     def upgrade_sh_degree_callback(iteration):
         # Every 1000 its we increase the levels of SH up to a maximum degree
-        if iteration % 2000 == 0:
+        if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
 
     # ============================ callbacks ===============================
@@ -251,7 +265,7 @@ def main(config: ExperimentConfig):
 
 if __name__ == "__main__":
     save_dir = Path(
-        "/home/jizong/Workspace/gaussian-splatting/output/verify_train_template"
+        "/home/jizong/Workspace/gaussian-splatting/output/verify_train_template-black-bg-yiq"
     )
 
     colmap_dir = Path(
@@ -261,7 +275,7 @@ if __name__ == "__main__":
         image_dir=colmap_dir / "images",
         mask_dir=None,
         depth_dir=None,
-        resolution=2,
+        resolution=4,
         pcd_path=colmap_dir / "sparse" / "0" / "points3D.ply",
         sparse_dir=colmap_dir / "sparse/0",
         force_centered_pp=False,
@@ -279,16 +293,17 @@ if __name__ == "__main__":
         scaling_lr=0.005,
         rotation_lr=0.005,
         percent_dense=0.01,
-        lambda_dssim=0.2,
+        lambda_dssim=0.6,
         densification_interval=500,
-        opacity_reset_interval=10000,
+        opacity_reset_interval=4500,
         densify_from_iter=4000,
         densify_until_iter=12_000,
         densify_grad_threshold=0.00001,
+        pose_lr_init=0.0,
     )
 
     finetuneConfig = ExperimentConfig(
-        model=ModelConfig(sh_degree=3, white_background=True),
+        model=ModelConfig(sh_degree=3, white_background=False),
         dataset=colmap_config,
         optimizer=optimizer_config,
         control=ControlConfig(save_dir=save_dir, test_iterations=5),

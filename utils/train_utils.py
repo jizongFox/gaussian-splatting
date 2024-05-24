@@ -76,17 +76,17 @@ def report_status(
 
             if tb_writer:
                 tb_writer.add_images(
-                    f"{tb_tag}_view_{image_name}/render",
+                    f"{tb_tag}/{image_name}/render",
                     image[None],
                     global_step=cur_iteration,
                 )
                 tb_writer.add_images(
-                    f"{tb_tag}_view_{image_name}/error",
+                    f"{tb_tag}/{image_name}/error",
                     torch.abs(image[None] - gt_image[None]),
                     global_step=cur_iteration,
                 )
                 tb_writer.add_images(
-                    f"{tb_tag}_view_{image_name}/gt",
+                    f"{tb_tag}/{image_name}/gt",
                     gt_image[None],
                     global_step=cur_iteration,
                 )
