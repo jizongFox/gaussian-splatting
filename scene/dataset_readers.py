@@ -281,7 +281,7 @@ def readColmapSceneInfo(
         test_cam_infos = []
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
-    logger.info(f"nerf_normalization: {nerf_normalization}")
+    # logger.info(f"nerf_normalization: {nerf_normalization}")
 
     ply_path = os.path.join(path, "points3D.ply")
 

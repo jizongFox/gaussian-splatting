@@ -146,7 +146,12 @@ class GaussianModel:
         return self.active_sh_degree == self.max_sh_degree
 
     def create_from_pcd(
-        self, pcd: BasicPointCloud, spatial_lr_scale: float, max_sphere: float = 1e-3
+        self,
+        pcd: BasicPointCloud,
+        spatial_lr_scale: float,
+        *,
+        max_sphere: float = 1e-3,
+        start_opacity: float = 0.1,
     ):
         if spatial_lr_scale == 0.0:
             spatial_lr_scale = 10.0
@@ -174,7 +179,7 @@ class GaussianModel:
         rots[:, 0] = 1
 
         opacities = inverse_sigmoid(
-            0.99
+            start_opacity
             * torch.ones(
                 (fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"
             )

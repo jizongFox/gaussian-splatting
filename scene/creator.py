@@ -9,7 +9,7 @@ from pathlib import Path
 
 from configs.base import SlamDatasetConfig, ColmapDatasetConfig
 from scene.cameras import Camera
-from scene.dataset_readers import fetchPly, readColmapSceneInfo, readSlamSceneInfo
+from scene.dataset_readers import readColmapSceneInfo, readSlamSceneInfo
 from scene.gaussian_model import GaussianModel
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
 from utils.system_utils import searchForMaxIteration
@@ -70,13 +70,6 @@ class Scene:
         else:
             raise ValueError("Unknown dataset type")
 
-        if dataset.pcd_path is not None:
-            logger.warning(f"using {dataset.pcd_path}")
-            scene_info.point_cloud = fetchPly(
-                dataset.pcd_path.as_posix(), remove_rgb_color=dataset.remove_pcd_color
-            )
-            scene_info.ply_path = dataset.pcd_path.as_posix()
-
         if not self.loaded_iter:
             with open(scene_info.ply_path, "rb") as src_file, open(
                 os.path.join(self.model_path, "input.ply"), "wb"
@@ -118,22 +111,6 @@ class Scene:
             )
             logger.debug(
                 f"Loaded {len(self.test_cameras[resolution_scale])} images at resolution scale {resolution_scale}"
-            )
-
-        if self.loaded_iter:
-            self.gaussians.load_ply(
-                os.path.join(
-                    self.model_path,
-                    "point_cloud",
-                    "iteration_" + str(self.loaded_iter),
-                    "point_cloud.ply",
-                ),
-            )
-        else:
-            self.gaussians.create_from_pcd(
-                scene_info.point_cloud,
-                self.cameras_extent,
-                max_sphere=dataset.max_sphere_distance,
             )
 
     def save(self, iteration):

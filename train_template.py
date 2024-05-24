@@ -30,7 +30,7 @@ from configs.base import (
 from gaussian_renderer import pose_depth_render
 from scene.cameras import Camera
 from scene.creator import Scene, GaussianModel
-from scene.dataset_readers import _preload  # noqa
+from scene.dataset_readers import _preload, fetchPly  # noqa
 from utils.loss_utils import (
     ssim,
     yiq_color_space_loss,
@@ -160,7 +160,7 @@ def training(
             cb(iteration)
 
         indicator.set_postfix(
-            {"loss": f"{loss.item():.4f}", "pcd": f"{len(gaussians):2e}"}
+            {"loss": f"{loss.item():.4f}", "pcd": f"{len(gaussians):.2e}"}
         )
 
         if iteration in config.control.test_iterations:
@@ -197,6 +197,7 @@ def training(
 
 
 def main(config: ExperimentConfig):
+    rich.print(config)
     _hash = get_hash()
     config.control.save_dir = config.control.save_dir / ("git_" + _hash)
 
@@ -215,6 +216,19 @@ def main(config: ExperimentConfig):
         load_iteration=None,
         shuffle=True,
     )
+    gaussians.create_from_pcd(
+        fetchPly(
+            config.dataset.pcd_path.as_posix(),
+            remove_rgb_color=config.dataset.remove_pcd_color,
+        ),
+        spatial_lr_scale=scene.cameras_extent,
+        max_sphere=config.dataset.max_sphere_distance,
+        start_opacity=config.dataset.pcd_start_opacity,
+    )
+    logger.info(
+        f"Loaded {len(gaussians)} points from {config.dataset.pcd_path}, opacity: {config.dataset.pcd_start_opacity}"
+    )
+
     optimizer = gaussians.training_setup(config.optimizer)
 
     pose_optimizer = scene.pose_optimizer(lr=config.optimizer.pose_lr_init)
@@ -227,7 +241,6 @@ def main(config: ExperimentConfig):
     tb_writer = prepare_output_and_logger(
         config.save_dir.as_posix(), Namespace(**vars(config))
     )
-    rich.print(config)
 
     # ============================ callbacks ===============================
     update_lr_gs_callback = lambda iteration: gaussians.update_learning_rate(  # noqa
@@ -265,7 +278,7 @@ def main(config: ExperimentConfig):
 
 if __name__ == "__main__":
     save_dir = Path(
-        "/home/jizong/Workspace/gaussian-splatting/output/verify_train_template-black-bg-yiq"
+        "/home/jizong/Workspace/gaussian-splatting/output/verify_produce-4fccf"
     )
 
     colmap_dir = Path(
@@ -275,8 +288,9 @@ if __name__ == "__main__":
         image_dir=colmap_dir / "images",
         mask_dir=None,
         depth_dir=None,
-        resolution=4,
+        resolution=2,
         pcd_path=colmap_dir / "sparse" / "0" / "points3D.ply",
+        pcd_start_opacity=0.1,
         sparse_dir=colmap_dir / "sparse/0",
         force_centered_pp=False,
         eval_every_n_frame=100,
@@ -285,25 +299,25 @@ if __name__ == "__main__":
     optimizer_config = OptimizerConfig(
         iterations=15_000,
         position_lr_init=0.00016,
-        position_lr_final=0.000016,
+        position_lr_final=0.0000016,
         position_lr_delay_mult=0.01,
         position_lr_max_steps=30_000,
-        feature_lr=0.025,
+        feature_lr=0.0025,
         opacity_lr=0.05,
         scaling_lr=0.005,
-        rotation_lr=0.005,
+        rotation_lr=0.001,
         percent_dense=0.01,
-        lambda_dssim=0.6,
-        densification_interval=500,
-        opacity_reset_interval=4500,
-        densify_from_iter=4000,
-        densify_until_iter=12_000,
-        densify_grad_threshold=0.00001,
+        lambda_dssim=1,
+        densification_interval=200,
+        opacity_reset_interval=2500,
+        densify_from_iter=500,
+        densify_until_iter=10_000,
+        densify_grad_threshold=0.000175,
         pose_lr_init=0.0,
     )
 
     finetuneConfig = ExperimentConfig(
-        model=ModelConfig(sh_degree=3, white_background=False),
+        model=ModelConfig(sh_degree=2, white_background=False),
         dataset=colmap_config,
         optimizer=optimizer_config,
         control=ControlConfig(save_dir=save_dir, test_iterations=5),

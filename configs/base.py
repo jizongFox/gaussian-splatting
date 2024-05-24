@@ -36,6 +36,8 @@ class DatasetConfig:
     resolution: int = 1
     pcd_path: Path
     """ loading point cloud path. """
+    pcd_start_opacity: float = 0.1
+    """ starting opacity for the point cloud. """
     remove_pcd_color: bool = False
 
     max_sphere_distance: float = 1e-3
@@ -149,7 +151,7 @@ class ExperimentConfig(_BaseConfig):
 
     control: ControlConfig
 
-    placeholder: str = ""
+    placeholder: str | None = None
 
     @property
     def save_dir(self):
