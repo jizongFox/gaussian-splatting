@@ -1,7 +1,7 @@
 import tyro
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Tuple, Union, TYPE_CHECKING, List
+from typing import Tuple, Union, TYPE_CHECKING
 
 
 @dataclass
@@ -26,11 +26,13 @@ class ModelConfig:
 
 
 @dataclass(kw_only=True)
-class _DatasetConfig:
+class DatasetConfig:
     image_dir: Path
     """image folder path"""
     mask_dir: Path | None
     """mask folder"""
+    depth_dir: Path | None = None
+    """depth folder"""
     resolution: int = 1
     pcd_path: Path
     """ loading point cloud path. """
@@ -40,15 +42,18 @@ class _DatasetConfig:
     force_centered_pp: bool = False
     """ force the principal point to be centered. """
 
+    eval_every_n_frame: int = 8
+    """ evaluate every n frame. """
+
 
 @dataclass(kw_only=True)
-class ColmapDatasetConfig(_DatasetConfig):
+class ColmapDatasetConfig(DatasetConfig):
     sparse_dir: Path
     """ sparse folder for colmap. """
 
 
 @dataclass(kw_only=True)
-class SlamDatasetConfig(_DatasetConfig):
+class SlamDatasetConfig(DatasetConfig):
     meta_file: Path
     """ meta_file for slam. """
 
@@ -71,6 +76,7 @@ class OptimizerConfig(_BaseConfig):
     densify_from_iter: int = 4000
     densify_until_iter: int = 12_000
     densify_grad_threshold: float = 0.00001  # this is to split more
+    pose_lr_init: float = 0.0
 
 
 @dataclass(kw_only=True)
@@ -91,12 +97,14 @@ class FinetuneOptimizerConfig(_BaseConfig):
     densify_from_iter: int = 4000
     densify_until_iter: int = 12_000
     densify_grad_threshold: float = 0.00001  # this is to split more
+    pose_lr_init: float = 0.0
 
 
 @dataclass
 class ControlConfig(_BaseConfig):
     save_dir: Path
-    test_iterations: List[int] = field(default_factory=lambda: [100, 1000, 10000])
+    test_iterations: field(init=False, default_factory=lambda: [])
+    num_evaluations: int = 10
 
 
 if not TYPE_CHECKING:
@@ -147,9 +155,19 @@ class ExperimentConfig(_BaseConfig):
     def save_dir(self):
         return self.control.save_dir
 
+    @property
+    def iterations(self):
+        return self.optimizer.iterations
+
     def __post_init__(self):
         self.save_dir.mkdir(parents=True, exist_ok=True)
-        self.control.test_iterations.append(self.optimizer.iterations)
+
+        test_iterations = [
+            self.iterations // self.control.num_evaluations * i
+            for i in range(1, self.control.num_evaluations)
+        ]
+        test_iterations.append(self.iterations)
+        self.control.test_iterations = test_iterations
 
 
 if __name__ == "__main__":

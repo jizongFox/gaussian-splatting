@@ -265,6 +265,7 @@ def readColmapSceneInfo(
     cam_infos: t.List[CameraInfo] = sorted(
         cam_infos_unsorted.copy(), key=lambda x: x.image_name
     )
+    cam_infos = [x for x in cam_infos if Path(x.image_path).exists()]
 
     if os.environ.get("DEBUG", "0") == "1":
         cam_infos = cam_infos[::2]

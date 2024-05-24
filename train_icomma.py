@@ -28,10 +28,10 @@ from arguments import (
     ICommaOptimizationParams,
 )
 from gaussian_renderer import icomma_render as render
-from scene import Scene, GaussianModel
 from scene.cameras import set_context
 from scene.dataset_readers import _preload  # noqa
-from utils.debug_utils import dump_image, personalized_loss
+from scene.scene_old import Scene, GaussianModel
+from utils.debug_utils import personalized_loss
 from utils.general_utils import safe_state
 from utils.loss_utils import (
     l1_loss,
@@ -58,12 +58,14 @@ def training(
     args,
 ):
     first_iter = 0
-    tb_writer = prepare_output_and_logger(dataset)
+    tb_writer = prepare_output_and_logger(args.model_path, dataset)
     gaussians = GaussianModel(dataset.sh_degree)
     if args.pcd_path is not None:
         logger.warning(f"using pcd_path = {args.pcd_path}")
     set_context("icomma")
-    scene = Scene(dataset, gaussians, pcd_path=args.pcd_path, global_args=args)
+    scene = Scene(
+        dataset, gaussians, pcd_path=args.pcd_path, global_args=args, shuffle=False
+    )
 
     if args.camera_pose is not None:
         logger.info(f"loading camera pose from {args.camera_pose}")
@@ -71,7 +73,7 @@ def training(
         for cur_camera in scene.getTrainCameras():
             cur_camera.load_state_dict(camera_poses[cur_camera.uid])
     pose_optimizer = torch.optim.Adam(
-        chain(*[x.parameters() for x in scene.getTrainCameras()]), lr=5e-5
+        chain(*[x.parameters() for x in scene.getTrainCameras()]), lr=1e-6
     )
 
     gaussians.training_setup(opt)
@@ -126,7 +128,7 @@ def training(
         )
         image_name = viewpoint_cam.image_name
 
-        dump_image(image_name, image, args, viewpoint_cam)
+        # dump_image(image_name, image, args, viewpoint_cam)
 
         if args.mask_dir is not None:
             mask_path = Path(args.mask_dir) / f"{image_name}.png.png"

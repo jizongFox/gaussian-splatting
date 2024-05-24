@@ -23,13 +23,12 @@ from tqdm import tqdm
 
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from gaussian_renderer import ori_render as render
-from scene import Scene, GaussianModel
 from scene.dataset_readers import _preload  # noqa
-from utils.debug_utils import dump_image, personalized_loss
+from scene.scene_old import Scene, GaussianModel
+from utils.debug_utils import personalized_loss
 from utils.general_utils import safe_state
 from utils.loss_utils import (
     l1_loss,
-    Entropy,
 )
 from utils.system_utils import get_hash
 from utils.train_utils import training_report, prepare_output_and_logger
@@ -52,7 +51,7 @@ def training(
     args,
 ):
     first_iter = 0
-    tb_writer = prepare_output_and_logger(dataset)
+    tb_writer = prepare_output_and_logger(args.model_path, dataset)
     gaussians = GaussianModel(dataset.sh_degree)
     if args.pcd_path is not None:
         logger.warning(f"using pcd_path = {args.pcd_path}")
@@ -63,6 +62,7 @@ def training(
         gaussians.restore(model_params, opt)
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
+
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
     iter_start = torch.cuda.Event(enable_timing=True)
@@ -75,7 +75,6 @@ def training(
     )
     first_iter += 1
 
-    ent_criterion = Entropy()
     for iteration in range(first_iter, opt.iterations + 1):
 
         iter_start.record()
@@ -110,7 +109,7 @@ def training(
 
         image_name = viewpoint_cam.image_name
 
-        dump_image(image_name, image, args, viewpoint_cam)
+        # dump_image(image_name, image, args, viewpoint_cam)
 
         if args.mask_dir is not None:
             mask_path = Path(args.mask_dir) / f"{image_name}.png.png"
@@ -136,23 +135,6 @@ def training(
 
         loss = personalized_loss(args, opt, Ll1, image, gt_image, mask_torch)
 
-        loss = loss
-
-        # else: entropy minimization
-        with torch.set_grad_enabled(True):
-            opacity = gaussians.opacity[visibility_filter]
-            if len(opacity) == 0:
-                ent_loss = torch.tensor(0.0, device=visibility_filter.device)
-            else:
-                opacity_dist = torch.cat([opacity, 1 - opacity], dim=1)
-                assert opacity_dist.shape[1] == 2, opacity_dist.shape
-
-                ent_loss = ent_criterion(opacity_dist)
-
-        # if iteration > opt.densify_until_iter:
-        loss = loss + ent_loss * args.ent_weight
-
-        tb_writer.add_scalar("train/entropy", ent_loss.item(), iteration)
         tb_writer.add_scalar("train/pcd_size", len(gaussians), iteration)
         tb_writer.add_scalar("train/sh_degree", gaussians.active_sh_degree, iteration)
 
@@ -201,7 +183,7 @@ def training(
                 gaussians.max_radii2D[visibility_filter], radii[visibility_filter]
             )
             gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
-            size_threshold = 12 if iteration > opt.opacity_reset_interval else None
+            size_threshold = 8 if iteration > opt.opacity_reset_interval else None
 
             if (
                 iteration > opt.densify_from_iter

@@ -56,6 +56,7 @@ class Scene:
                 eval_mode=True,
                 load_pcd=False,
                 force_centered_pp=dataset.force_centered_pp,
+                llffhold=dataset.eval_every_n_frame,
             )
         elif isinstance(dataset, SlamDatasetConfig):
             scene_info = readSlamSceneInfo(
@@ -64,6 +65,7 @@ class Scene:
                 eval_mode=True,
                 load_pcd=False,
                 force_centered_pp=dataset.force_centered_pp,
+                llffhold=dataset.eval_every_n_frame,
             )
         else:
             raise ValueError("Unknown dataset type")
