@@ -1,6 +1,5 @@
 import json
 import os
-import random
 import torch.optim
 import typing as t
 from itertools import chain
@@ -24,7 +23,6 @@ class Scene:
         dataset: t.Union["SlamDatasetConfig", "ColmapDatasetConfig"],
         save_dir: Path,
         load_iteration: int = None,
-        shuffle=True,
         resolution_scales=(1,),
     ):
         """
@@ -85,14 +83,6 @@ class Scene:
                 json_cams.append(camera_to_JSON(id, cam))
             with open(os.path.join(self.model_path, "cameras.json"), "w") as file:
                 json.dump(json_cams, file)
-
-        if shuffle:
-            random.shuffle(
-                scene_info.train_cameras
-            )  # Multi-res consistent random shuffling
-            random.shuffle(
-                scene_info.test_cameras
-            )  # Multi-res consistent random shuffling
 
         self.cameras_extent = scene_info.nerf_normalization["radius"]
 
