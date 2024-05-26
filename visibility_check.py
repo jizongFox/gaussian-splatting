@@ -79,7 +79,7 @@ def training(
             render_pkg["alphas"],
         )
 
-        if accum_alphas.mean() > 0.5:
+        if accum_alphas.mean() > 0.6:
             visibility_list.add(viewpoint_cam.image_name)
             with open(save_dir / "visibility.json", "w") as f:
                 json.dump(sorted(visibility_list), f)
@@ -102,7 +102,7 @@ slam_data_dir = Path(
     "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/"
 )
 save_dir = Path(
-    "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/outputs/3dgs/"
+    "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/outputs/3dgs-subset/"
 )
 
 slam_config = SlamDatasetConfig(
@@ -170,7 +170,7 @@ logger.info(
 camera_iterator = _iterate_over_cameras(
     cameras=scene.getTrainCameras(),
     data_conf=config.dataset,
-    shuffle=False,
+    shuffle=True,
     infinite=False,
 )
 bg_color = [1, 1, 1] if config.model.white_background else [0, 0, 0]
