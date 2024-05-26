@@ -51,7 +51,7 @@ class Scene:
             scene_info = readColmapSceneInfo(
                 dataset.sparse_dir.as_posix(),
                 dataset.image_dir.as_posix(),
-                eval_mode=True,
+                eval_mode=dataset.eval_mode,
                 load_pcd=False,
                 force_centered_pp=dataset.force_centered_pp,
                 llffhold=dataset.eval_every_n_frame,
@@ -60,7 +60,7 @@ class Scene:
             scene_info = readSlamSceneInfo(
                 image_dir=dataset.image_dir.as_posix(),
                 json_path=dataset.meta_file.as_posix(),
-                eval_mode=True,
+                eval_mode=dataset.eval_mode,
                 load_pcd=False,
                 force_centered_pp=dataset.force_centered_pp,
                 llffhold=dataset.eval_every_n_frame,
@@ -69,8 +69,9 @@ class Scene:
             raise ValueError("Unknown dataset type")
 
         if not self.loaded_iter:
-            with open(scene_info.ply_path, "rb") as src_file, open(
-                os.path.join(self.model_path, "input.ply"), "wb"
+            # todo: to check this part.
+            with open(dataset.pcd_path, "rb") as src_file, open(
+                os.path.join(save_dir, "input.ply"), "wb"
             ) as dest_file:
                 dest_file.write(src_file.read())
             json_cams = []

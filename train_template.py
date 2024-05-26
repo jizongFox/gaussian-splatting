@@ -214,7 +214,6 @@ def main(config: ExperimentConfig):
         config.dataset,
         save_dir=config.save_dir,
         load_iteration=None,
-        shuffle=True,
     )
     gaussians.create_from_pcd(
         fetchPly(
@@ -320,7 +319,7 @@ if __name__ == "__main__":
         model=ModelConfig(sh_degree=2, white_background=False),
         dataset=colmap_config,
         optimizer=optimizer_config,
-        control=ControlConfig(save_dir=save_dir, test_iterations=5),
+        control=ControlConfig(save_dir=save_dir, num_evaluations=10),
     )
     config = tyro.cli(tyro.extras.subcommand_type_from_defaults({"ft": finetuneConfig}))
     main(config)

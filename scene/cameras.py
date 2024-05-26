@@ -12,9 +12,11 @@ import numpy as np
 import torch
 import typing as t
 from jaxtyping import Float
+from pathlib import Path
 from torch import nn, Tensor
 
 from gaussian_renderer.finetune_utils import initialize_quat_delta, quat2rotation
+from utils.general_utils import run_resize
 from utils.graphics_utils import (
     getProjectionMatrixShift,
     getWorld2View_torch,
@@ -40,13 +42,15 @@ class Camera(nn.Module):
         focal_y: float,
         cx: float,
         cy: float,
-        image: Float[Tensor, "3 h w"],
+        image: Float[Tensor, "3 h w"] | str | Path,
         gt_alpha_mask: t.Optional[Float[Tensor, "h w"]],
         image_name: str,
         uid: int,
         trans: Float[np.ndarray, "3 "] = np.array([0.0, 0.0, 0.0]),
         scale: float = 1.0,
         data_device: str = "cuda",
+        image_width: int = None,
+        image_height: int = None,
     ):
         """
         Camera class for storing camera information and image data.
@@ -65,6 +69,7 @@ class Camera(nn.Module):
         :param trans: additional translation vector
         :param scale: scale factor
         :param data_device: device to store data
+        :param downsample: downsample factor
 
         """
         super(Camera, self).__init__()
@@ -81,16 +86,10 @@ class Camera(nn.Module):
 
         self.data_device = torch.device(data_device)
 
-        self.original_image = image.clamp(0.0, 1.0).to(self.data_device)
-        self.image_width = self.original_image.shape[2]
-        self.image_height = self.original_image.shape[1]
+        self.image_width = image_width
+        self.image_height = image_height
 
-        if gt_alpha_mask is not None:
-            self.original_image *= gt_alpha_mask.to(self.data_device)
-        else:
-            self.original_image *= torch.ones(
-                (1, self.image_height, self.image_width), device=self.data_device
-            )
+        self.image = image
 
         self.zfar = 100.0
         self.znear = 0.0000001
@@ -100,18 +99,14 @@ class Camera(nn.Module):
         self.focal_x = focal_x
         self.focal_y = focal_y
 
-        enable_delta: bool = False
-        if context == "icomma":
-            enable_delta: bool = True
-
         # add delta
         self.delta_quat: Float[Tensor, "1 4"] = nn.Parameter(
             initialize_quat_delta(1, device=data_device),
-            requires_grad=enable_delta,
+            requires_grad=False,
         )
         self.delta_t: Float[Tensor, "1 3"] = nn.Parameter(
             torch.zeros(1, 3, device=data_device),
-            requires_grad=enable_delta,
+            requires_grad=False,
         )
         #
         # to ndc matrix?
@@ -207,3 +202,21 @@ class Camera(nn.Module):
     @property
     def image_id(self) -> int:
         return self.uid
+
+    @property
+    def original_image(self) -> Tensor:
+        try:
+            return run_resize(
+                image_path=self.image, width=self.image_width, height=self.image_height
+            )
+        except AttributeError as e:
+            raise RuntimeError(e)
+        # if isinstance(self.image, (str, Path)):
+
+        # return run_resize(
+        #     image_path=self.image, width=self.image_width, height=self.image_height
+        # )
+        # elif isinstance(self.image, Tensor):
+        #     return self.image
+        # else:
+        #     raise ValueError("Image type not supported")

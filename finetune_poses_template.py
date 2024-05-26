@@ -14,6 +14,7 @@ import typing as t
 import tyro
 import yaml
 from argparse import Namespace
+from loguru import logger
 from pathlib import Path
 from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
@@ -25,11 +26,10 @@ from configs.base import (
     ControlConfig,
     FinetuneOptimizerConfig,
     SlamDatasetConfig,
-    ColmapDatasetConfig,
 )
 from gaussian_renderer import pose_depth_render
 from scene.creator import Scene, GaussianModel
-from scene.dataset_readers import _preload  # noqa
+from scene.dataset_readers import _preload, fetchPly  # noqa
 from utils.debug_utils import save_images
 from utils.depth_related import SobelDepthLoss
 from utils.system_utils import get_hash
@@ -121,36 +121,23 @@ def training(
 
 #%% configuration
 slam_data_dir = Path(
-    "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1/"
+    "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/"
 )
 save_dir = Path(
-    "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/"
-    "subregion1/outputs/test-depth-loss-depth-sorbel-depth-loss"
+    "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/outputs/3dgs/"
 )
 
 slam_config = SlamDatasetConfig(
-    image_dir=slam_data_dir / "images",
-    mask_dir=slam_data_dir / "masks" "",
-    depth_dir=slam_data_dir.parent / "depths",
-    meta_file=slam_data_dir.parent / "meta_updated.json",
-    pcd_path=slam_data_dir.parent / "korea_accoms_outside.ply",
+    image_dir=slam_data_dir,
+    mask_dir=None,
+    depth_dir=None,
+    meta_file=slam_data_dir / "meta.json",
+    pcd_path=slam_data_dir / "subregion1.ply",
     remove_pcd_color=False,
-    max_sphere_distance=1e-2,
+    resolution=4,
+    max_sphere_distance=1e-1,
 )
-colmap_dir = Path(
-    "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/"
-)
-colmap_config = ColmapDatasetConfig(
-    image_dir=colmap_dir.parent / "subregion1" / "images",
-    mask_dir=colmap_dir / "masks",
-    depth_dir=colmap_dir.parent / "depths",
-    resolution=1,
-    pcd_path=Path(
-        "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1/subregion1-new-2.ply"
-    ),
-    sparse_dir=colmap_dir / "colmap-simpler-alignment/sparse/0",
-    force_centered_pp=False,
-)
+
 
 optimizer_config = FinetuneOptimizerConfig(
     iterations=45_000,
@@ -169,13 +156,14 @@ optimizer_config = FinetuneOptimizerConfig(
     densify_from_iter=4000,
     densify_until_iter=12_000,
     densify_grad_threshold=0.00001,  # this is to split more
+    pose_lr_init=0.0,
 )
 
 finetuneConfig = ExperimentConfig(
     model=ModelConfig(sh_degree=1, white_background=True),
     dataset=slam_config,
     optimizer=optimizer_config,
-    control=ControlConfig(save_dir=save_dir),
+    control=ControlConfig(save_dir=save_dir, test_iterations=10),
 )
 config = tyro.cli(tyro.extras.subcommand_type_from_defaults({"ft": finetuneConfig}))
 
@@ -197,12 +185,25 @@ scene = Scene(
     config.dataset,
     save_dir=config.save_dir,
     load_iteration=None,
-    shuffle=True,
     resolution_scales=(1,),
 )
+gaussians.create_from_pcd(
+    fetchPly(
+        config.dataset.pcd_path.as_posix(),
+        remove_rgb_color=config.dataset.remove_pcd_color,
+    ),
+    spatial_lr_scale=scene.cameras_extent,
+    max_sphere=config.dataset.max_sphere_distance,
+    start_opacity=config.dataset.pcd_start_opacity,
+)
+logger.info(
+    f"Loaded {len(gaussians)} points from {config.dataset.pcd_path}, opacity: {config.dataset.pcd_start_opacity}"
+)
+
+
 optimizer = gaussians.training_setup(config.optimizer)
 
-pose_optimizer = scene.pose_optimizer(lr=1e-4)
+pose_optimizer = scene.pose_optimizer(lr=config.optimizer.pose_lr_init)
 pose_scheduler = torch.optim.lr_scheduler.StepLR(
     pose_optimizer, step_size=5000, gamma=0.75
 )

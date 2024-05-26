@@ -19,6 +19,7 @@ import typing as t
 from PIL import Image
 from dataclasses import dataclass
 from functools import lru_cache
+from itertools import chain
 from jaxtyping import Float
 from loguru import logger
 from pathlib import Path
@@ -268,7 +269,7 @@ def readColmapSceneInfo(
     cam_infos = [x for x in cam_infos if Path(x.image_path).exists()]
 
     if os.environ.get("DEBUG", "0") == "1":
-        cam_infos = cam_infos[::2]
+        cam_infos = cam_infos[::4]
 
     train_cam_infos: t.List[CameraInfo]
     test_cam_infos: t.List[CameraInfo]
@@ -355,7 +356,10 @@ def _read_slam_intrinsic_and_extrinsic(
     # del camera_id
 
     def iterate_word2cam_matrix(meta_file, image_folder):
-        available_image_names = [x.name for x in image_folder.glob("*.png")]
+        available_image_names = [
+            x.relative_to(image_folder).as_posix()
+            for x in chain(image_folder.rglob("*.png"), image_folder.rglob("*.jpeg"))
+        ]
 
         for cur_frame in meta_file["data"]:
             for cur_camera_name, cur_c2w in cur_frame["worldTcam"].items():
@@ -478,7 +482,7 @@ def readSlamSceneInfo(
     )
 
     if os.environ.get("DEBUG", "0") == "1":
-        cam_infos = cam_infos[::2]
+        cam_infos = cam_infos[::4]
 
     train_cam_infos: t.List[CameraInfo]
     test_cam_infos: t.List[CameraInfo]

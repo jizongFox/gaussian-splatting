@@ -1,7 +1,7 @@
 import tyro
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Tuple, Union, TYPE_CHECKING
+from typing import Tuple, Union, TYPE_CHECKING, List
 
 
 @dataclass
@@ -46,6 +46,8 @@ class DatasetConfig:
 
     eval_every_n_frame: int = 8
     """ evaluate every n frame. """
+
+    eval_mode: bool = True
 
 
 @dataclass(kw_only=True)
@@ -102,11 +104,11 @@ class FinetuneOptimizerConfig(_BaseConfig):
     pose_lr_init: float = 0.0
 
 
-@dataclass
+@dataclass(kw_only=True)
 class ControlConfig(_BaseConfig):
     save_dir: Path
-    test_iterations: field(init=False, default_factory=lambda: [])
     num_evaluations: int = 10
+    test_iterations: List[int] = field(init=False, default_factory=lambda: [])
 
 
 if not TYPE_CHECKING:
