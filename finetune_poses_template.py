@@ -31,7 +31,7 @@ from gaussian_renderer import pose_depth_render
 from scene.creator import Scene, GaussianModel
 from scene.dataset_readers import _preload, fetchPly  # noqa
 from utils.debug_utils import save_images
-from utils.depth_related import SobelDepthLoss
+from utils.depth_related import SparseNerfDepthLoss
 from utils.system_utils import get_hash
 from utils.train_utils import prepare_output_and_logger, iterate_over_cameras
 
@@ -45,8 +45,9 @@ def training(
     optimizers: t.List[torch.optim.Optimizer],
     end_of_iter_cbs: t.List[t.Callable],
 ):
-    # depth_criterion = SparseNerfDepthLoss(patch_size=48, stride=48)
-    depth_criterion = SobelDepthLoss().cuda()
+    depth_criterion = SparseNerfDepthLoss(patch_size=48, stride=48)
+    # depth_criterion = SobelDepthLoss().cuda()
+    # depth_criterion = ScaleAndShiftInvariantLoss()
 
     for iteration in tqdm(range(0, config.optimizer.iterations + 1)):
 
@@ -120,27 +121,34 @@ def training(
 
 
 #%% configuration
-slam_data_dir = Path(
-    "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/"
+slam_dir = Path(
+    "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1"
 )
 save_dir = Path(
-    "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/outputs/3dgs/"
+    "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1/"
+    "outputs/test_depth_loss/pretrained-poses/test-depth-loss-depth-sparse-nerf-2"
 )
+
 
 slam_config = SlamDatasetConfig(
-    image_dir=slam_data_dir,
-    mask_dir=None,
-    depth_dir=None,
-    meta_file=slam_data_dir / "meta.json",
-    pcd_path=slam_data_dir / "subregion1.ply",
+    image_dir=slam_dir / "images",
+    mask_dir=slam_dir / "masks",
+    depth_dir=Path(
+        "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/depths"
+    ),
+    resolution=2,
+    pcd_path=slam_dir
+    / "outputs/test_depth_loss/pretrained-poses/test-depth-loss-depth-scale-shift-depth/git_2ab75d2/input.ply",
+    pcd_start_opacity=1.0,
     remove_pcd_color=False,
-    resolution=4,
-    max_sphere_distance=1e-1,
+    max_sphere_distance=1e-3,
+    force_centered_pp=False,
+    eval_mode=False,
+    meta_file=slam_dir / "meta_updated.json",
 )
 
-
 optimizer_config = FinetuneOptimizerConfig(
-    iterations=45_000,
+    iterations=12_000,
     position_lr_init=0.0000,
     position_lr_final=0.00000,
     position_lr_delay_mult=0.01,
@@ -156,7 +164,7 @@ optimizer_config = FinetuneOptimizerConfig(
     densify_from_iter=4000,
     densify_until_iter=12_000,
     densify_grad_threshold=0.00001,  # this is to split more
-    pose_lr_init=0.0,
+    pose_lr_init=2e-4,
 )
 
 finetuneConfig = ExperimentConfig(
@@ -205,7 +213,7 @@ optimizer = gaussians.training_setup(config.optimizer)
 
 pose_optimizer = scene.pose_optimizer(lr=config.optimizer.pose_lr_init)
 pose_scheduler = torch.optim.lr_scheduler.StepLR(
-    pose_optimizer, step_size=5000, gamma=0.75
+    pose_optimizer, step_size=config.iterations // 4, gamma=0.75
 )
 update_lr_pose_callback = lambda iteration: pose_scheduler.step()  # noqa
 
@@ -229,5 +237,5 @@ training(
     end_of_iter_cbs=[update_lr_gs_callback, update_lr_pose_callback],
 )
 
-camera_checkpoint = {x.image_id: x.state_dict() for x in scene.getTrainCameras()}
+camera_checkpoint = {x.image_name: x.state_dict() for x in scene.getTrainCameras()}
 torch.save(camera_checkpoint, config.save_dir / "camera_checkpoint.pth")

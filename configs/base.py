@@ -62,6 +62,10 @@ class SlamDatasetConfig(DatasetConfig):
     meta_file: Path
     """ meta_file for slam. """
 
+    def __post_init__(self):
+        # assert self.meta_file.is_file() and self.meta_file.exists(), self.meta_file
+        pass
+
 
 @dataclass(kw_only=True)
 class OptimizerConfig(_BaseConfig):

@@ -477,6 +477,7 @@ def readSlamSceneInfo(
         images_folder=image_dir,
         force_centered_pp=force_centered_pp,
     )
+    assert len(cam_infos_unsorted) > 0, "No valid camera found."
     cam_infos: t.List[CameraInfo] = sorted(
         cam_infos_unsorted.copy(), key=lambda x: x.image_name
     )
