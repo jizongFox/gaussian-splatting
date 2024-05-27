@@ -163,7 +163,7 @@ finetuneConfig = ExperimentConfig(
     model=ModelConfig(sh_degree=1, white_background=True),
     dataset=slam_config,
     optimizer=optimizer_config,
-    control=ControlConfig(save_dir=save_dir, test_iterations=10),
+    control=ControlConfig(save_dir=save_dir, num_evaluations=10),
 )
 config = tyro.cli(tyro.extras.subcommand_type_from_defaults({"ft": finetuneConfig}))
 

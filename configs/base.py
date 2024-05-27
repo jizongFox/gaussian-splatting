@@ -1,5 +1,6 @@
 import tyro
 from dataclasses import dataclass, field
+from loguru import logger
 from pathlib import Path
 from typing import Tuple, Union, TYPE_CHECKING, List
 
@@ -81,6 +82,12 @@ class OptimizerConfig(_BaseConfig):
     densify_until_iter: int = 12_000
     densify_grad_threshold: float = 0.00001  # this is to split more
     pose_lr_init: float = 0.0
+
+    def __post_init__(self):
+        if self.lambda_dssim == 0:
+            logger.warning(f"dssim is disabled.")
+        elif self.lambda_dssim == 1:
+            raise ValueError("pixelwise loss is disabled.")
 
 
 @dataclass(kw_only=True)
