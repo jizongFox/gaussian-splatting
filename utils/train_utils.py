@@ -3,7 +3,6 @@ import os
 import threading
 import torch
 import typing as t
-import uuid
 from PIL import Image
 from PIL.Image import Resampling
 from argparse import Namespace
@@ -15,7 +14,7 @@ from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from configs.base import DatasetConfig
+from configs.base import DatasetConfig, ExperimentConfig
 from scene.cameras import Camera
 from scene.creator import Scene
 from .image_utils import psnr
@@ -107,19 +106,38 @@ def report_status(
     return tra_result, test_result
 
 
-def prepare_output_and_logger(model_path: str, config: Namespace):
-    if not model_path:
-        if os.getenv("OAR_JOB_ID"):
-            unique_str = os.getenv("OAR_JOB_ID")
-        else:
-            unique_str = str(uuid.uuid4())
-        model_path = os.path.join("./output/", unique_str[0:10])
-
+def prepare_output_and_logger(exp_conf: ExperimentConfig):
+    model_path = exp_conf.save_dir.as_posix()
     # Set up output folder
     print("Output folder: {}".format(model_path))
     os.makedirs(model_path, exist_ok=True)
+
+    def adaptor_to_old_format():
+        """
+        Namespace(
+        data_device='cuda',
+        eval=False,
+        images='images',
+        model_path='output/meetingroom/l2',
+        resolution=2,
+        sh_degree=3,
+        source_path='/home/jizong/Workspace/nerfstudio/data/1037-1039-single-cam-OPENCV-undistort',
+        white_background=False
+        )
+        """
+        return Namespace(
+            data_device="cuda",
+            eval=exp_conf.dataset.eval_mode,
+            images=exp_conf.dataset.image_dir,
+            source_path=exp_conf.dataset.sparse_dir,
+            model_path=model_path,
+            resolution=exp_conf.dataset.resolution,
+            sh_degree=exp_conf.model.sh_degree,
+            white_background=exp_conf.model.white_background,
+        )
+
     with open(os.path.join(model_path, "cfg_args"), "w") as cfg_log_f:
-        cfg_log_f.write(str(Namespace(**vars(config))))
+        cfg_log_f.write(str(Namespace(**vars(adaptor_to_old_format()))))
 
     # Create Tensorboard writer
     tb_writer = SummaryWriter(model_path)
@@ -146,7 +164,7 @@ def _iterate_over_cameras(
             )
 
             if data_conf.mask_dir is not None:
-                mask_path = Path(data_conf.mask_dir) / f"{image_name}.png.png"
+                mask_path = Path(data_conf.mask_dir) / f"{image_name}.png"
                 with Image.open(mask_path) as fmask:
                     fmask = fmask.convert("L").resize(
                         (gt_image.shape[2], gt_image.shape[1]), Resampling.NEAREST

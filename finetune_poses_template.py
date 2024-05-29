@@ -13,7 +13,6 @@ import torch
 import typing as t
 import tyro
 import yaml
-from argparse import Namespace
 from loguru import logger
 from pathlib import Path
 from torch import Tensor
@@ -31,7 +30,7 @@ from gaussian_renderer import pose_depth_render
 from scene.creator import Scene, GaussianModel
 from scene.dataset_readers import _preload, fetchPly  # noqa
 from utils.debug_utils import save_images
-from utils.depth_related import SparseNerfDepthLoss
+from utils.depth_related import SobelDepthLoss
 from utils.system_utils import get_hash
 from utils.train_utils import prepare_output_and_logger, iterate_over_cameras
 
@@ -45,8 +44,8 @@ def training(
     optimizers: t.List[torch.optim.Optimizer],
     end_of_iter_cbs: t.List[t.Callable],
 ):
-    depth_criterion = SparseNerfDepthLoss(patch_size=48, stride=48)
-    # depth_criterion = SobelDepthLoss().cuda()
+    # depth_criterion = SparseNerfDepthLoss(patch_size=48, stride=48)
+    depth_criterion = SobelDepthLoss().cuda()
     # depth_criterion = ScaleAndShiftInvariantLoss()
 
     for iteration in tqdm(range(0, config.optimizer.iterations + 1)):
@@ -126,7 +125,7 @@ slam_dir = Path(
 )
 save_dir = Path(
     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1/"
-    "outputs/test_depth_loss/pretrained-poses/test-depth-loss-depth-sparse-nerf-2"
+    "outputs/test_depth_loss/pretrained-poses/test-depth-loss-depth-sorbel-depth-loss-2"
 )
 
 
@@ -225,7 +224,7 @@ camera_iterator = iterate_over_cameras(
 bg_color = [1, 1, 1] if config.model.white_background else [0, 0, 0]
 background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 tb_writer = prepare_output_and_logger(
-    config.save_dir.as_posix(), Namespace(**vars(config))
+    config
 )
 rich.print(config)
 training(

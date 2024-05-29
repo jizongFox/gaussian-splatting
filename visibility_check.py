@@ -14,7 +14,6 @@ import torch
 import typing as t
 import tyro
 import yaml
-from argparse import Namespace
 from loguru import logger
 from pathlib import Path
 from tqdm import tqdm
@@ -175,9 +174,7 @@ camera_iterator = _iterate_over_cameras(
 )
 bg_color = [1, 1, 1] if config.model.white_background else [0, 0, 0]
 background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-tb_writer = prepare_output_and_logger(
-    config.save_dir.as_posix(), Namespace(**vars(config))
-)
+tb_writer = prepare_output_and_logger(config)
 rich.print(config)
 visibility = training(
     config=config,
