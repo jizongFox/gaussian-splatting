@@ -68,6 +68,11 @@ class SlamDatasetConfig(DatasetConfig):
 
 
 @dataclass(kw_only=True)
+class _OptimizationConfig(_BaseConfig):
+    pass
+
+
+@dataclass(kw_only=True)
 class OptimizerConfig(_BaseConfig):
     iterations: int = 15_000
     position_lr_init: float = 0.00016
@@ -154,13 +159,15 @@ else:
     OPTCONFIG = Union[OptimizerConfig, FinetuneOptimizerConfig]
 
 
-@dataclass
+@dataclass(kw_only=True)
 class ExperimentConfig(_BaseConfig):
     model: ModelConfig
 
     dataset: DATACONFIG
 
     optimizer: OPTCONFIG
+
+    bkg_optimizer: OPTCONFIG | None = None
 
     control: ControlConfig
 

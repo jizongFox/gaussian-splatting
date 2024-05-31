@@ -8,12 +8,13 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+import open3d as o3d
 import rich
 import torch
 import typing as t
 import tyro
 import yaml
-from argparse import Namespace
+from itertools import chain
 from loguru import logger
 from pathlib import Path
 from torch import Tensor
@@ -21,16 +22,18 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from configs.base import (
-    ColmapDatasetConfig,
     ExperimentConfig,
     OptimizerConfig,
     ModelConfig,
     ControlConfig,
+    ColmapDatasetConfig,
 )
-from gaussian_renderer import pose_depth_render
+from gaussian_renderer import pose_depth_render_unified
 from scene.cameras import Camera
 from scene.creator import Scene, GaussianModel
 from scene.dataset_readers import _preload, fetchPly  # noqa
+from scene.gaussian_model import merge_gaussian_models
+from utils.background_helper import BackgroundPCDCreator
 from utils.loss_utils import (
     ssim,
     yiq_color_space_loss,
@@ -53,6 +56,7 @@ def densification(
     visibility_filter: Tensor,
     viewspace_point_tensor: Tensor,
     size_threshold: int = 12,
+    min_opacity: float = 0.001,
 ):
     # Densification
     if iteration < optim_conf.densify_until_iter:
@@ -61,9 +65,9 @@ def densification(
             gaussians.max_radii2D[visibility_filter], radii[visibility_filter]
         )
         gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
-        size_threshold = (
-            size_threshold if iteration > optim_conf.opacity_reset_interval else None
-        )
+        # size_threshold = (
+        #     size_threshold if iteration > optim_conf.opacity_reset_interval else None
+        # )
 
         if (
             iteration > optim_conf.densify_from_iter
@@ -72,7 +76,7 @@ def densification(
             logger.trace(f"calling densify_and_prune at iteration {iteration}")
             gaussians.densify_and_prune(
                 optim_conf.densify_grad_threshold,
-                0.005,
+                min_opacity,
                 scene.cameras_extent,
                 size_threshold,
             )
@@ -83,7 +87,7 @@ def densification(
     else:
         # after having densified the pcd, we should prune the invisibile 3d gaussians.
         if iteration % 500 == 0:
-            opacity_mask = gaussians.opacity <= 0.005
+            opacity_mask = t.cast(Tensor, gaussians.opacity <= min_opacity)
             logger.trace(f"pruned {opacity_mask.sum()} points at iteration {iteration}")
             gaussians.prune_points(opacity_mask.squeeze(-1))
 
@@ -92,6 +96,7 @@ def training(
     *,
     config: ExperimentConfig,
     gaussians: GaussianModel,
+    bkg_gaussian: GaussianModel | None = None,
     scene: Scene,
     tra_cameras: t.List[Camera],
     test_cameras: t.List[Camera],
@@ -115,9 +120,10 @@ def training(
         gt_image = cur_camera["target"]
         mask = cur_camera["mask"]
 
-        render_pkg = pose_depth_render(
+        render_pkg, *_ = pose_depth_render_unified(
             viewpoint_cam,
             model=gaussians,
+            background_model=bkg_gaussian,
             bg_color=background,
         )
         image, depth, viewspace_point_tensor, visibility_filter, radii, accum_alphas = (
@@ -134,7 +140,7 @@ def training(
         image = image * mask
 
         Ll1 = (1.0 - config.optimizer.lambda_dssim) * yiq_color_space_loss(
-            image[None, ...], gt_image[None, ...], channel_weight=(0.1, 1, 1)
+            image[None, ...], gt_image[None, ...], channel_weight=(1, 1, 1)
         ) + config.optimizer.lambda_dssim * (
             1.0
             - ssim(
@@ -165,16 +171,20 @@ def training(
 
         if iteration in config.control.test_iterations:
             logger.info(f"Testing at iteration {iteration}")
-            report_status(
+            tra_result, test_result = report_status(
                 train_cameras=tra_cameras[::100],
                 test_cameras=test_cameras,
                 data_config=config.dataset,
-                render_func=lambda camera: pose_depth_render(
-                    camera, model=gaussians, bg_color=background
-                ),
+                render_func=lambda camera: pose_depth_render_unified(
+                    camera,
+                    model=gaussians,
+                    bg_color=background,
+                    background_model=bkg_gaussian,
+                )[0],
                 tb_writer=writer,
                 iteration=iteration,
             )
+            logger.info(f"Train: {tra_result}, Test: {test_result}")
             logger.info(f"Saving at iteration {iteration}")
 
             point_cloud_path = (
@@ -182,7 +192,8 @@ def training(
                 / f"point_cloud/iteration_{iteration:06d}"
                 / "point_cloud.ply"
             )
-            gaussians.save_ply(point_cloud_path)
+            new_gaussian = merge_gaussian_models(gaussians, bkg_gaussian)
+            new_gaussian.save_ply(point_cloud_path)
 
         densification(
             iteration=iteration,
@@ -190,13 +201,14 @@ def training(
             radii=radii,
             visibility_filter=visibility_filter,
             viewspace_point_tensor=viewspace_point_tensor,
-            size_threshold=12,
+            size_threshold=5,
             gaussians=gaussians,
             scene=scene,
+            min_opacity=0.001,
         )
 
 
-def main(config: ExperimentConfig):
+def main(config: ExperimentConfig, pose_checkpoint_path: Path | None = None):
     rich.print(config)
     _hash = get_hash()
     config.control.save_dir = config.control.save_dir / ("git_" + _hash)
@@ -215,6 +227,18 @@ def main(config: ExperimentConfig):
         save_dir=config.save_dir,
         load_iteration=None,
     )
+
+    if pose_checkpoint_path is not None:
+        poses_checkpoint = torch.load(pose_checkpoint_path)
+        for poses in chain(scene.getTrainCameras(), scene.getTestCameras()):
+            try:
+                poses.load_state_dict(poses_checkpoint[poses.image_name])
+            except KeyError as e:
+                logger.warning(e)
+                continue
+        logger.info(f"Loaded poses from {pose_checkpoint_path}")
+        del poses_checkpoint
+
     gaussians.create_from_pcd(
         fetchPly(
             config.dataset.pcd_path.as_posix(),
@@ -232,19 +256,44 @@ def main(config: ExperimentConfig):
 
     pose_optimizer = scene.pose_optimizer(lr=config.optimizer.pose_lr_init)
     pose_scheduler = torch.optim.lr_scheduler.StepLR(
-        pose_optimizer, step_size=config.iterations // 4, gamma=0.2
+        pose_optimizer, step_size=config.iterations // 4, gamma=0.5
     )
 
     bg_color = [1, 1, 1] if config.model.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-    tb_writer = prepare_output_and_logger(
-        config.save_dir.as_posix(), Namespace(**vars(config))
+    tb_writer = prepare_output_and_logger(config)
+
+    # background model
+    bkg_pcd: o3d.geometry.PointCloud = BackgroundPCDCreator(
+        gaussian_model=gaussians,
+        background=background,
+        cameras=scene.getTrainCameras()[::10],
+        data_config=config.dataset,
+        alpha_threshold=0.1,
+        num_points=int(5e4),
+    ).main()
+    bkg_pcd_path = str(config.save_dir / "background_pcd.ply")
+    o3d.io.write_point_cloud(
+        bkg_pcd_path,
+        bkg_pcd,
     )
+    bkg_gaussians = GaussianModel(1)
+    bkg_gaussians.create_from_pcd(
+        bkg_pcd,
+        spatial_lr_scale=scene.cameras_extent,
+        max_sphere=1.0,
+        start_opacity=0.1,
+    )
+
+    bkg_optimizer = bkg_gaussians.training_setup(config.bkg_optimizer)
 
     # ============================ callbacks ===============================
     update_lr_gs_callback = lambda iteration: gaussians.update_learning_rate(  # noqa
         iteration
     )
+    update_lr_bkg_gs_callback = lambda iteration: bkg_gaussians.update_learning_rate(
+        iteration
+    )  # noqa
 
     update_lr_pose_callback = lambda iteration: pose_scheduler.step()  # noqa
 
@@ -252,20 +301,23 @@ def main(config: ExperimentConfig):
         # Every 1000 its we increase the levels of SH up to a maximum degree
         if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
+            bkg_gaussians.oneupSHdegree()
 
     # ============================ callbacks ===============================
 
     training(
         config=config,
         gaussians=gaussians,
+        bkg_gaussian=bkg_gaussians,
         scene=scene,
         background=background,
         tra_cameras=scene.getTrainCameras(),
         test_cameras=scene.getTestCameras(),
         writer=tb_writer,
-        optimizers=[pose_optimizer, optimizer],
+        optimizers=[pose_optimizer, optimizer, bkg_optimizer],
         end_of_iter_cbs=[
             update_lr_gs_callback,
+            update_lr_bkg_gs_callback,
             update_lr_pose_callback,
             upgrade_sh_degree_callback,
         ],
@@ -277,49 +329,95 @@ def main(config: ExperimentConfig):
 
 if __name__ == "__main__":
     save_dir = Path(
-        "/home/jizong/Workspace/gaussian-splatting/output/verify_produce-4fccf"
+        "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/outputs/subregion6-2-origin-slam-pcd-background-model-3"
     )
+    # slam_dir = Path(
+    #     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1"
+    # )
+    #
+    # slam_config = SlamDatasetConfig(
+    #     image_dir=slam_dir / "images",
+    #     mask_dir=slam_dir / "masks",
+    #     depth_dir=None,
+    #     resolution=2,
+    #     pcd_path=slam_dir
+    #     / "outputs/test_depth_loss/pretrained-poses/test-depth-loss-depth-scale-shift-depth/git_2ab75d2/input.ply",
+    #     pcd_start_opacity=0.99,
+    #     remove_pcd_color=False,
+    #     max_sphere_distance=1e-3,
+    #     force_centered_pp=False,
+    #     eval_every_n_frame=60,
+    #     eval_mode=True,
+    #     meta_file=slam_dir / "meta_updated.json",
+    # )
+    # pose_checkpoint_path = Path(
+    #     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1/outputs/test_depth_loss/"
+    #     "pretrained-poses/test-depth-loss-depth-sparse-nerf-2/git_f47faa1/camera_checkpoint.pth"
+    # )
 
     colmap_dir = Path(
-        "/home/jizong/Workspace/dConstruct/nerfstudio/data/1037-1039-single-cam-OPENCV-undistort"
+        "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/subset_dataset/subregion6"
     )
     colmap_config = ColmapDatasetConfig(
         image_dir=colmap_dir / "images",
-        mask_dir=None,
-        depth_dir=None,
+        mask_dir=colmap_dir / "masks",
+        depth_dir=colmap_dir / "depths",
         resolution=2,
-        pcd_path=colmap_dir / "sparse" / "0" / "points3D.ply",
-        pcd_start_opacity=0.1,
-        sparse_dir=colmap_dir / "sparse/0",
+        pcd_path=Path(
+            "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/subregion4-downsampled-opencv.ply"
+        ),
+        pcd_start_opacity=1.0,
+        max_sphere_distance=1e-2,
+        sparse_dir=colmap_dir / "colmap" / "triangulation-rig" / "prior_sparse",
         force_centered_pp=False,
-        eval_every_n_frame=100,
+        eval_every_n_frame=45,
     )
 
     optimizer_config = OptimizerConfig(
-        iterations=15_000,
-        position_lr_init=0.00016,
-        position_lr_final=0.0000016,
+        iterations=16_000,
+        position_lr_init=0.00000016,
+        position_lr_final=0.000000016,
         position_lr_delay_mult=0.01,
         position_lr_max_steps=30_000,
-        feature_lr=0.0025,
-        opacity_lr=0.05,
-        scaling_lr=0.005,
-        rotation_lr=0.001,
+        feature_lr=0.005,
+        opacity_lr=0.02,
+        scaling_lr=0.002,
+        rotation_lr=0.002,
         percent_dense=0.01,
-        lambda_dssim=1,
+        lambda_dssim=0.1,
         densification_interval=200,
-        opacity_reset_interval=2500,
-        densify_from_iter=500,
+        opacity_reset_interval=3000000,
+        densify_from_iter=5000,
         densify_until_iter=10_000,
-        densify_grad_threshold=0.000175,
-        pose_lr_init=0.0,
+        densify_grad_threshold=0.0001,
+        pose_lr_init=0e-5,
+    )
+    bkg_optimizer_config = OptimizerConfig(
+        iterations=16_000,
+        position_lr_init=0.00016,
+        position_lr_final=0.000016,
+        position_lr_delay_mult=0.01,
+        position_lr_max_steps=30_000,
+        feature_lr=0.005,
+        opacity_lr=0.02,
+        scaling_lr=0.002,
+        rotation_lr=0.002,
+        percent_dense=0.01,
+        lambda_dssim=0.1,
+        densification_interval=200,
+        opacity_reset_interval=300000000,
+        densify_from_iter=50000000000,
+        densify_until_iter=10_000000,
+        densify_grad_threshold=1,
+        pose_lr_init=0e-5,
     )
 
     finetuneConfig = ExperimentConfig(
-        model=ModelConfig(sh_degree=2, white_background=False),
+        model=ModelConfig(sh_degree=1, white_background=True),
         dataset=colmap_config,
         optimizer=optimizer_config,
-        control=ControlConfig(save_dir=save_dir, num_evaluations=10),
+        bkg_optimizer=bkg_optimizer_config,
+        control=ControlConfig(save_dir=save_dir, num_evaluations=16),
     )
     config = tyro.cli(tyro.extras.subcommand_type_from_defaults({"ft": finetuneConfig}))
-    main(config)
+    main(config, pose_checkpoint_path=None)

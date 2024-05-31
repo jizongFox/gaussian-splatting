@@ -8,13 +8,15 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+from __future__ import annotations
+
 import numpy as np
 import os
 import torch
 import typing as t
 from loguru import logger
 from plyfile import PlyData, PlyElement
-from simple_knn._C import distCUDA2
+from simple_knn._C import distCUDA2  # noqa
 from torch import nn, Tensor
 
 from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
@@ -40,6 +42,18 @@ def setup_functions(self):
     self._inverse_opacity_activation = inverse_sigmoid
 
     self._rotation_activation = torch.nn.functional.normalize
+
+
+def merge_gaussian_models(*model: GaussianModel):
+    new_model = GaussianModel(model[0].max_sh_degree)
+    new_model.active_sh_degree = model[0].active_sh_degree
+    new_model._xyz = torch.cat([m._xyz for m in model], dim=0)
+    new_model._features_dc = torch.cat([m._features_dc for m in model], dim=0)
+    new_model._features_rest = torch.cat([m._features_rest for m in model], dim=0)
+    new_model._scaling = torch.cat([m._scaling for m in model], dim=0)
+    new_model._rotation = torch.cat([m._rotation for m in model], dim=0)
+    new_model._opacity = torch.cat([m._opacity for m in model], dim=0)
+    return new_model
 
 
 class GaussianModel:
