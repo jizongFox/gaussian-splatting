@@ -124,6 +124,7 @@ class FinetuneOptimizerConfig(_BaseConfig):
 class ControlConfig(_BaseConfig):
     save_dir: Path
     num_evaluations: int = 10
+    include_0_epoch: bool = False
     test_iterations: List[int] = field(init=False, default_factory=lambda: [])
 
 
@@ -190,6 +191,9 @@ class ExperimentConfig(_BaseConfig):
         ]
         test_iterations.append(self.iterations)
         self.control.test_iterations = test_iterations
+        if self.control.include_0_epoch:
+            if 1 not in self.control.test_iterations:
+                self.control.test_iterations.append(1)
 
 
 if __name__ == "__main__":
