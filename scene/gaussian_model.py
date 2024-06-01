@@ -184,7 +184,8 @@ class GaussianModel:
         features[:, 3:, 1:] = 0.0
         has_normal = False
 
-        if pcd.normals is not None:
+        if pcd.normals is not None and len(np.array(pcd.normals)) > 0:
+            logger.warning(f"using normal")
             has_normal = True
             v3 = torch.from_numpy(np.array(pcd.normals)).float().cuda()
             v2 = torch.cross(
