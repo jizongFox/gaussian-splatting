@@ -272,11 +272,7 @@ def main(config: ExperimentConfig, pose_checkpoint_path: Path | None = None):
         alpha_threshold=0.1,
         num_points=int(5e4),
     ).main()
-    bkg_pcd_path = str(config.save_dir / "background_pcd.ply")
-    o3d.io.write_point_cloud(
-        bkg_pcd_path,
-        bkg_pcd,
-    )
+    o3d.io.write_point_cloud(str(config.save_dir / "background_pcd.ply"), bkg_pcd)
     bkg_gaussians = GaussianModel(1)
     bkg_gaussians.create_from_pcd(
         bkg_pcd,
@@ -291,10 +287,9 @@ def main(config: ExperimentConfig, pose_checkpoint_path: Path | None = None):
     update_lr_gs_callback = lambda iteration: gaussians.update_learning_rate(  # noqa
         iteration
     )
-    update_lr_bkg_gs_callback = lambda iteration: bkg_gaussians.update_learning_rate(
-        iteration
-    )  # noqa
-
+    update_lr_bkg_gs_callback = (
+        lambda iteration: bkg_gaussians.update_learning_rate(iteration)  # noqa
+    )
     update_lr_pose_callback = lambda iteration: pose_scheduler.step()  # noqa
 
     def upgrade_sh_degree_callback(iteration):
@@ -329,7 +324,8 @@ def main(config: ExperimentConfig, pose_checkpoint_path: Path | None = None):
 
 if __name__ == "__main__":
     save_dir = Path(
-        "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/outputs/subregion6-2-origin-slam-pcd-background-model-3"
+        "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/outputs/"
+        "subregion6-2-origin-slam-pcd-background-model-3"
     )
     # slam_dir = Path(
     #     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1"
