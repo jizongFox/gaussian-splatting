@@ -208,7 +208,11 @@ def training(
         )
 
 
-def main(config: ExperimentConfig, pose_checkpoint_path: Path | None = None):
+def main(
+    config: ExperimentConfig,
+    pose_checkpoint_path: Path | None = None,
+    use_bkg_model: bool = False,
+):
     rich.print(config)
     _hash = get_hash()
     config.control.save_dir = config.control.save_dir / ("git_" + _hash)
@@ -217,7 +221,9 @@ def main(config: ExperimentConfig, pose_checkpoint_path: Path | None = None):
 
     config.control.save_dir.mkdir(parents=True, exist_ok=True)
 
-    Path(config.control.save_dir, "config.yaml").write_text(yaml.dump(vars(config)))
+    Path(config.control.save_dir, "config.yaml").write_text(
+        yaml.dump(vars(config))
+    )
 
     gaussians = GaussianModel(config.model.sh_degree)
 
@@ -262,41 +268,49 @@ def main(config: ExperimentConfig, pose_checkpoint_path: Path | None = None):
     bg_color = [1, 1, 1] if config.model.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
     tb_writer = prepare_output_and_logger(config)
-
-    # background model
-    bkg_pcd: o3d.geometry.PointCloud = BackgroundPCDCreator(
-        gaussian_model=gaussians,
-        background=background,
-        cameras=scene.getTrainCameras()[::10],
-        data_config=config.dataset,
-        alpha_threshold=0.1,
-        num_points=int(5e4),
-    ).main()
-    o3d.io.write_point_cloud(str(config.save_dir / "background_pcd.ply"), bkg_pcd)
-    bkg_gaussians = GaussianModel(1)
-    bkg_gaussians.create_from_pcd(
-        bkg_pcd,
-        spatial_lr_scale=scene.cameras_extent,
-        max_sphere=1.0,
-        start_opacity=0.1,
-    )
-
-    bkg_optimizer = bkg_gaussians.training_setup(config.bkg_optimizer)
+    if use_bkg_model:
+        logger.info("Using background model")
+        # background model
+        bkg_pcd: o3d.geometry.PointCloud = BackgroundPCDCreator(
+            gaussian_model=gaussians,
+            background=background,
+            cameras=scene.getTrainCameras()[::10],
+            data_config=config.dataset,
+            alpha_threshold=0.1,
+            num_points=int(5e4),
+        ).main()
+        o3d.io.write_point_cloud(
+            str(config.save_dir / "background_pcd.ply"), bkg_pcd
+        )
+        bkg_gaussians = GaussianModel(1)
+        bkg_gaussians.create_from_pcd(
+            bkg_pcd,
+            spatial_lr_scale=scene.cameras_extent,
+            max_sphere=1.0,
+            start_opacity=0.1,
+        )
+        bkg_optimizer = bkg_gaussians.training_setup(config.bkg_optimizer)
+        update_lr_bkg_gs_callback = (
+            lambda iteration: bkg_gaussians.update_learning_rate(iteration)  # noqa
+        )
+    else:
+        bkg_gaussians = None
+        bkg_optimizer = None
+        update_lr_bkg_gs_callback = None
 
     # ============================ callbacks ===============================
     update_lr_gs_callback = lambda iteration: gaussians.update_learning_rate(  # noqa
         iteration
     )
-    update_lr_bkg_gs_callback = (
-        lambda iteration: bkg_gaussians.update_learning_rate(iteration)  # noqa
-    )
+
     update_lr_pose_callback = lambda iteration: pose_scheduler.step()  # noqa
 
     def upgrade_sh_degree_callback(iteration):
         # Every 1000 its we increase the levels of SH up to a maximum degree
         if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
-            bkg_gaussians.oneupSHdegree()
+            if bkg_gaussians is not None:
+                bkg_gaussians.oneupSHdegree()
 
     # ============================ callbacks ===============================
 
@@ -309,13 +323,15 @@ def main(config: ExperimentConfig, pose_checkpoint_path: Path | None = None):
         tra_cameras=scene.getTrainCameras(),
         test_cameras=scene.getTestCameras(),
         writer=tb_writer,
-        optimizers=[pose_optimizer, optimizer, bkg_optimizer],
-        end_of_iter_cbs=[
+        optimizers=[
+            x for x in [pose_optimizer, optimizer, bkg_optimizer] if x is not None
+        ],
+        end_of_iter_cbs=[x for x in [
             update_lr_gs_callback,
             update_lr_bkg_gs_callback,
             update_lr_pose_callback,
             upgrade_sh_degree_callback,
-        ],
+        ] if x is not None],
     )
 
     camera_checkpoint = {x.image_id: x.state_dict() for x in scene.getTrainCameras()}
@@ -324,8 +340,7 @@ def main(config: ExperimentConfig, pose_checkpoint_path: Path | None = None):
 
 if __name__ == "__main__":
     save_dir = Path(
-        "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/outputs/"
-        "subregion6-2-origin-slam-pcd-background-model-3"
+        "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/outputs/3dgs-align-normals/try2"
     )
     # slam_dir = Path(
     #     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1"
@@ -350,21 +365,30 @@ if __name__ == "__main__":
     #     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1/outputs/test_depth_loss/"
     #     "pretrained-poses/test-depth-loss-depth-sparse-nerf-2/git_f47faa1/camera_checkpoint.pth"
     # )
-
-    colmap_dir = Path(
-        "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/subset_dataset/subregion6"
-    )
+    #
+    # colmap_dir = Path(
+    #     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/"
+    #     "colmap-simpler-alignment/sparse/0"
+    # )
     colmap_config = ColmapDatasetConfig(
-        image_dir=colmap_dir / "images",
-        mask_dir=colmap_dir / "masks",
-        depth_dir=colmap_dir / "depths",
+        image_dir=Path(
+            "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/images-nerfacto-keep-pp"
+        ),
+        mask_dir=Path(
+            "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/masks"
+        ),
+        depth_dir=Path(
+            "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/depths"
+        ),
         resolution=2,
         pcd_path=Path(
-            "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/subregion4-downsampled-opencv.ply"
+            "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/korea_accoms_outside_normal-opencv.ply"
         ),
         pcd_start_opacity=1.0,
         max_sphere_distance=1e-2,
-        sparse_dir=colmap_dir / "colmap" / "triangulation-rig" / "prior_sparse",
+        sparse_dir=Path(
+            "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/colmap-simpler-alignment/sparse/0"
+        ),
         force_centered_pp=False,
         eval_every_n_frame=45,
     )
@@ -385,7 +409,7 @@ if __name__ == "__main__":
         opacity_reset_interval=3000000,
         densify_from_iter=5000,
         densify_until_iter=10_000,
-        densify_grad_threshold=0.0001,
+        densify_grad_threshold=0.0005,
         pose_lr_init=0e-5,
     )
     bkg_optimizer_config = OptimizerConfig(
@@ -413,7 +437,9 @@ if __name__ == "__main__":
         dataset=colmap_config,
         optimizer=optimizer_config,
         bkg_optimizer=bkg_optimizer_config,
-        control=ControlConfig(save_dir=save_dir, num_evaluations=16),
+        control=ControlConfig(
+            save_dir=save_dir, num_evaluations=16, include_0_epoch=True
+        ),
     )
     config = tyro.cli(tyro.extras.subcommand_type_from_defaults({"ft": finetuneConfig}))
     main(config, pose_checkpoint_path=None)
