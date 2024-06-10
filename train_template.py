@@ -8,6 +8,8 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+from __future__ import annotations
+
 import open3d as o3d
 import rich
 import torch
@@ -140,7 +142,7 @@ def training(
         image = image * mask
 
         Ll1 = (1.0 - config.optimizer.lambda_dssim) * yiq_color_space_loss(
-            image[None, ...], gt_image[None, ...], channel_weight=(1, 1, 1)
+            image[None, ...], gt_image[None, ...], channel_weight=(0.75, 1, 1)
         ) + config.optimizer.lambda_dssim * (
             1.0
             - ssim(
@@ -204,7 +206,7 @@ def training(
             size_threshold=5,
             gaussians=gaussians,
             scene=scene,
-            min_opacity=0.001,
+            min_opacity=0.01,
         )
 
 
@@ -219,9 +221,10 @@ def main(
 
     print("Optimizing " + config.save_dir.as_posix())
 
-    config.control.save_dir.mkdir(parents=True, exist_ok=True)
+    config.save_dir.mkdir(parents=True, exist_ok=True)
+    logger.add(config.save_dir / "log.log", level="TRACE", backtrace=True, diagnose=True)
 
-    Path(config.control.save_dir, "config.yaml").write_text(
+    Path(config.save_dir, "config.yaml").write_text(
         yaml.dump(vars(config))
     )
 
@@ -274,7 +277,7 @@ def main(
         bkg_pcd: o3d.geometry.PointCloud = BackgroundPCDCreator(
             gaussian_model=gaussians,
             background=background,
-            cameras=scene.getTrainCameras()[::10],
+            cameras=scene.getTrainCameras()[:],
             data_config=config.dataset,
             alpha_threshold=0.1,
             num_points=int(5e4),
@@ -339,78 +342,101 @@ def main(
 
 
 if __name__ == "__main__":
-    save_dir = Path(
-        "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/outputs/3dgs-align-normals/try2"
-    )
-    # slam_dir = Path(
-    #     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1"
-    # )
-    #
-    # slam_config = SlamDatasetConfig(
-    #     image_dir=slam_dir / "images",
-    #     mask_dir=slam_dir / "masks",
-    #     depth_dir=None,
-    #     resolution=2,
-    #     pcd_path=slam_dir
-    #     / "outputs/test_depth_loss/pretrained-poses/test-depth-loss-depth-scale-shift-depth/git_2ab75d2/input.ply",
-    #     pcd_start_opacity=0.99,
-    #     remove_pcd_color=False,
+    # save_dir = Path(
+    #     "/data/test_otheroffice.dslam/undistorted") / "outputs" / "colmap-11-slam-pcd-ba-BIG-reset-opacity-prune-0.01-true-slam-sh-0-more-epoch"
+    # # slam_dir = Path(
+    # #     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1"
+    # # )
+    # #
+    # # slam_config = SlamDatasetConfig(
+    # #     image_dir=slam_dir / "images",
+    # #     mask_dir=slam_dir / "masks",
+    # #     depth_dir=None,
+    # #     resolution=2,
+    # #     pcd_path=slam_dir
+    # #     / "outputs/test_depth_loss/pretrained-poses/test-depth-loss-depth-scale-shift-depth/git_2ab75d2/input.ply",
+    # #     pcd_start_opacity=0.99,
+    # #     remove_pcd_color=False,
+    # #     max_sphere_distance=1e-3,
+    # #     force_centered_pp=False,
+    # #     eval_every_n_frame=60,
+    # #     eval_mode=True,
+    # #     meta_file=slam_dir / "meta_updated.json",
+    # # )
+    # # pose_checkpoint_path = Path(
+    # #     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1/outputs/test_depth_loss/"
+    # #     "pretrained-poses/test-depth-loss-depth-sparse-nerf-2/git_f47faa1/camera_checkpoint.pth"
+    # # )
+    # #
+    # # colmap_dir = Path(
+    # #     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/"
+    # #     "colmap-simpler-alignment/sparse/0"
+    # # )
+    # colmap_config = ColmapDatasetConfig(
+    #     image_dir=Path(
+    #         "/data/test_otheroffice.dslam/undistorted/images"
+    #     ),
+    #     mask_dir=Path(
+    #         "/data/test_otheroffice.dslam/undistorted/masks"
+    #     ),
+    #     # mask_dir=None,
+    #     depth_dir=Path(
+    #         "/data/test_otheroffice.dslam/undistorted/depths"
+    #     ),
+    #     resolution=1,
+    #     pcd_path=Path(
+    #         "/data/test_otheroffice.dslam/test_otheroffice-downsample-opencv-remove-outlier.ply"
+    #     ),
+    #     pcd_start_opacity=0.5,
     #     max_sphere_distance=1e-3,
+    #     sparse_dir=Path(
+    #         "/data/test_otheroffice.dslam/undistorted/colmap/BA/prior_sparse"
+    #     ),
     #     force_centered_pp=False,
-    #     eval_every_n_frame=60,
-    #     eval_mode=True,
-    #     meta_file=slam_dir / "meta_updated.json",
+    #     eval_every_n_frame=45,
     # )
-    # pose_checkpoint_path = Path(
-    #     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1/outputs/test_depth_loss/"
-    #     "pretrained-poses/test-depth-loss-depth-sparse-nerf-2/git_f47faa1/camera_checkpoint.pth"
-    # )
-    #
-    # colmap_dir = Path(
-    #     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/"
-    #     "colmap-simpler-alignment/sparse/0"
-    # )
+    save_dir = Path("/home/jizong/workspace/data/bundleAdjustment_korea_scene2/subregion3/outputs/3dgs-pose-optimizer")
+
     colmap_config = ColmapDatasetConfig(
         image_dir=Path(
-            "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/images-nerfacto-keep-pp"
+            "/home/jizong/workspace/data/bundleAdjustment_korea_scene2/subregion3/images"
         ),
         mask_dir=Path(
-            "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/masks"
+            "/home/jizong/workspace/data/bundleAdjustment_korea_scene2/subregion3/masks-w-people"
         ),
+        # mask_dir=None,
         depth_dir=Path(
-            "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/depths"
+            "/home/jizong/workspace/data/bundleAdjustment_korea_scene2/depths"
         ),
-        resolution=2,
+        resolution=1,
         pcd_path=Path(
-            "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/korea_accoms_outside_normal-opencv.ply"
+            "/home/jizong/workspace/data/bundleAdjustment_korea_scene2/korea_accoms_outside-opencv.ply"
         ),
-        pcd_start_opacity=1.0,
-        max_sphere_distance=1e-2,
+        pcd_start_opacity=0.5,
+        max_sphere_distance=1e-3,
         sparse_dir=Path(
-            "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/colmap-simpler-alignment/sparse/0"
+            "/home/jizong/workspace/data/bundleAdjustment_korea_scene2/colmaps/colmap-triangulation-vocab-tree/prior_sparse"
         ),
-        force_centered_pp=False,
         eval_every_n_frame=45,
     )
-
     optimizer_config = OptimizerConfig(
-        iterations=16_000,
-        position_lr_init=0.00000016,
-        position_lr_final=0.000000016,
+        iterations=28_000,
+        position_lr_init=0.00002,
+        position_lr_final=0.000002,
         position_lr_delay_mult=0.01,
-        position_lr_max_steps=30_000,
-        feature_lr=0.005,
-        opacity_lr=0.02,
-        scaling_lr=0.002,
-        rotation_lr=0.002,
+        position_lr_max_steps=9_000,
+        feature_lr=0.002,
+        opacity_lr=0.025,
+        scaling_lr=0.0008,
+        rotation_lr=0.0005,
         percent_dense=0.01,
-        lambda_dssim=0.1,
+        lambda_dssim=0.2,
         densification_interval=200,
-        opacity_reset_interval=3000000,
-        densify_from_iter=5000,
-        densify_until_iter=10_000,
-        densify_grad_threshold=0.0005,
-        pose_lr_init=0e-5,
+        opacity_reset_interval=4000,
+        densify_from_iter=1000,
+        densify_until_iter=20_000,
+        densify_grad_threshold=0.00005,
+        pose_lr_init=5e-5,
     )
     bkg_optimizer_config = OptimizerConfig(
         iterations=16_000,
@@ -442,4 +468,4 @@ if __name__ == "__main__":
         ),
     )
     config = tyro.cli(tyro.extras.subcommand_type_from_defaults({"ft": finetuneConfig}))
-    main(config, pose_checkpoint_path=None)
+    main(config, pose_checkpoint_path=None, use_bkg_model=False)

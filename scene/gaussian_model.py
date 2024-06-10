@@ -184,10 +184,15 @@ class GaussianModel:
         features[:, 3:, 1:] = 0.0
         has_normal = False
 
-        if pcd.normals is not None and len(np.array(pcd.normals)) > 0:
+        if pcd.normals is not None and len(np.array(pcd.normals)) > 0 and np.all(
+                np.linalg.norm(np.array(pcd.normals), axis=-1) > 0.0):
             logger.warning(f"using normal")
-            has_normal = True
-            v3 = torch.from_numpy(np.array(pcd.normals)).float().cuda()
+            # breakpoint()
+            # has_normal = True
+            normals = np.array(pcd.normals)
+            normals = normals + np.random.randn(*normals.shape) * 1e-6
+            normals /= np.linalg.norm(normals, axis=-1, keepdims=True)
+            v3 = torch.from_numpy(normals).float().cuda()
             v2 = torch.cross(
                 v3, torch.tensor([0.0, 0.0, 1.0], device="cuda").repeat(v3.shape[0], 1)
             )
@@ -255,7 +260,7 @@ class GaussianModel:
             },
             {
                 "params": [self._features_rest],
-                "lr": training_args.feature_lr / 20.0,
+                "lr": training_args.feature_lr / 200000000.0,
                 "name": "f_rest",
             },
             {

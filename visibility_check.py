@@ -78,7 +78,7 @@ def training(
             render_pkg["alphas"],
         )
 
-        if accum_alphas.mean() > 0.6:
+        if accum_alphas.mean() > 0.8:
             visibility_list.add(viewpoint_cam.image_name)
             with open(save_dir / "visibility.json", "w") as f:
                 json.dump(sorted(visibility_list), f)
@@ -98,18 +98,18 @@ def training(
 
 #%% configuration
 slam_data_dir = Path(
-    "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/"
+    "/data/CHANGI_T3_DEPART.dslam"
 )
 save_dir = Path(
-    "/home/jizong/Workspace/dConstruct/data/orchard_tilted_rich.dslam/outputs/3dgs-subset/"
+    "/data/CHANGI_T3_DEPART.dslam/outputs/3dgs-subset-based-on-krittin/"
 )
 
 slam_config = SlamDatasetConfig(
-    image_dir=slam_data_dir,
+    image_dir=slam_data_dir / "undistorted/images",
     mask_dir=None,
     depth_dir=None,
-    meta_file=slam_data_dir / "meta.json",
-    pcd_path=slam_data_dir / "subregion1-downsampled.ply",
+    meta_file=slam_data_dir / "undistorted/meta.json",
+    pcd_path=Path("/data/ChangiAirportT3_OldFormat/CHANGI_T3_DEPART-downsample.ply"),
     remove_pcd_color=False,
     resolution=8,
     max_sphere_distance=0.01,
@@ -169,7 +169,7 @@ logger.info(
 camera_iterator = _iterate_over_cameras(
     cameras=scene.getTrainCameras(),
     data_conf=config.dataset,
-    shuffle=True,
+    shuffle=False,
     infinite=False,
 )
 bg_color = [1, 1, 1] if config.model.white_background else [0, 0, 0]

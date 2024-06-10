@@ -64,13 +64,17 @@ class BackgroundPCDCreator:
             Float[Tensor, "1 h w"], accum_alphas > self.alpha_threshold
         )
 
+    @torch.no_grad()
     def main(self) -> PointCloud:
         batched_points = []
 
         for cur_camera_dict in tqdm(self.camera_iter):
             camera = cur_camera_dict["camera"]
             # rel_depth = cur_camera_dict["depth"]
+
             abs_depth, visibility_mask = self._get_accum_mask(camera)
+            if not torch.any(visibility_mask):
+                continue
 
             # compute the scale and shift coefficient from the rel and abs depths
             # scale, shift = normalized_depth_scale_and_shift(

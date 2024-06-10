@@ -129,7 +129,7 @@ def prepare_output_and_logger(exp_conf: ExperimentConfig):
             data_device="cuda",
             eval=exp_conf.dataset.eval_mode,
             images=exp_conf.dataset.image_dir,
-            source_path=exp_conf.dataset.sparse_dir,
+            # source_path=exp_conf.dataset.sparse_dir,
             model_path=model_path,
             resolution=exp_conf.dataset.resolution,
             sh_degree=exp_conf.model.sh_degree,
@@ -165,6 +165,16 @@ def _iterate_over_cameras(
 
             if data_conf.mask_dir is not None:
                 mask_path = Path(data_conf.mask_dir) / f"{image_name}.png"
+                mask_path2 = Path(data_conf.mask_dir) / f"{image_name}.jpeg.png"
+                mask_path3 = Path(data_conf.mask_dir) / f"{image_name}.png.png"
+                assert mask_path.exists() or mask_path2.exists() or mask_path3.exists()
+                if mask_path3.exists():
+                    mask_path = mask_path3
+                elif mask_path2.exists():
+                    mask_path = mask_path2
+                else:
+                    mask_path = mask_path
+                # mask_path = mask_path if mask_path.exists() else mask_path2
                 with Image.open(mask_path) as fmask:
                     fmask = fmask.convert("L").resize(
                         (gt_image.shape[2], gt_image.shape[1]), Resampling.NEAREST
