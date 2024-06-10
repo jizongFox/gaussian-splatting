@@ -52,7 +52,7 @@ def training(
 
     visibility_list = set()
 
-    for iteration in tqdm(range(0, config.optimizer.iterations + 1)):
+    for iteration in tqdm(range(0, config.iterations + 1)):
         try:
             cur_camera = next(camera_iters)
         except StopIteration:
@@ -97,12 +97,8 @@ def training(
 
 
 #%% configuration
-slam_data_dir = Path(
-    "/data/CHANGI_T3_DEPART.dslam"
-)
-save_dir = Path(
-    "/data/CHANGI_T3_DEPART.dslam/outputs/3dgs-subset-based-on-krittin/"
-)
+slam_data_dir = Path("/data/CHANGI_T3_DEPART.dslam")
+save_dir = Path("/data/CHANGI_T3_DEPART.dslam/outputs/3dgs-subset-based-on-krittin/")
 
 slam_config = SlamDatasetConfig(
     image_dir=slam_data_dir / "undistorted/images",
@@ -123,6 +119,7 @@ finetuneConfig = ExperimentConfig(
     dataset=slam_config,
     optimizer=FinetuneOptimizerConfig(),
     control=ControlConfig(
+        iterations=40000,
         save_dir=save_dir,
         num_evaluations=0,
     ),

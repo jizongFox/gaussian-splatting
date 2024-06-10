@@ -62,19 +62,9 @@ class SlamDatasetConfig(DatasetConfig):
     meta_file: Path
     """ meta_file for slam. """
 
-    def __post_init__(self):
-        # assert self.meta_file.is_file() and self.meta_file.exists(), self.meta_file
-        pass
-
 
 @dataclass(kw_only=True)
 class _OptimizationConfig(_BaseConfig):
-    pass
-
-
-@dataclass(kw_only=True)
-class OptimizerConfig(_BaseConfig):
-    iterations: int = 15_000
     position_lr_init: float = 0.00016
     position_lr_final: float = 0.000016
     position_lr_delay_mult: float = 0.01
@@ -83,6 +73,10 @@ class OptimizerConfig(_BaseConfig):
     opacity_lr: float = 0.05
     scaling_lr: float = 0.005
     rotation_lr: float = 0.005
+
+
+@dataclass(kw_only=True)
+class OptimizerConfig(_OptimizationConfig):
     percent_dense: float = 0.01  # this is to reduce the size of the eclipse
     lambda_dssim: float = 0.2
     densification_interval: int = 500
@@ -90,7 +84,8 @@ class OptimizerConfig(_BaseConfig):
     densify_from_iter: int = 4000
     densify_until_iter: int = 12_000
     densify_grad_threshold: float = 0.00001  # this is to split more
-    pose_lr_init: float = 0.0
+
+    min_opacity: float = 1e-5
 
     def __post_init__(self):
         if self.lambda_dssim == 0:
@@ -100,8 +95,12 @@ class OptimizerConfig(_BaseConfig):
 
 
 @dataclass(kw_only=True)
-class FinetuneOptimizerConfig(_BaseConfig):
-    iterations: int = 15_000
+class BackgroundConfig(_OptimizationConfig):
+    pass
+
+
+@dataclass(kw_only=True)
+class FinetuneOptimizerConfig(OptimizerConfig):
     position_lr_init: float = 0.0000001
     position_lr_final: float = 0.000000001
     position_lr_delay_mult: float = 0.01
@@ -117,12 +116,14 @@ class FinetuneOptimizerConfig(_BaseConfig):
     densify_from_iter: int = 4000
     densify_until_iter: int = 12_000
     densify_grad_threshold: float = 0.00001  # this is to split more
-    pose_lr_init: float = 0.0
 
 
 @dataclass(kw_only=True)
 class ControlConfig(_BaseConfig):
     save_dir: Path
+    iterations: int = 15_000
+    pose_lr_init: float = 0.0
+
     num_evaluations: int = 10
     include_0_epoch: bool = False
     test_iterations: List[int] = field(init=False, default_factory=lambda: [])
@@ -168,7 +169,7 @@ class ExperimentConfig(_BaseConfig):
 
     optimizer: OPTCONFIG
 
-    bkg_optimizer: OPTCONFIG | None = None
+    bkg_optimizer: BackgroundConfig | None = None
 
     control: ControlConfig
 
@@ -180,7 +181,7 @@ class ExperimentConfig(_BaseConfig):
 
     @property
     def iterations(self):
-        return self.optimizer.iterations
+        return self.control.iterations
 
     def __post_init__(self):
         self.save_dir.mkdir(parents=True, exist_ok=True)

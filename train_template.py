@@ -29,11 +29,12 @@ from configs.base import (
     ModelConfig,
     ControlConfig,
     ColmapDatasetConfig,
+    BackgroundConfig,
 )
 from gaussian_renderer import pose_depth_render_unified
 from scene.cameras import Camera
 from scene.creator import Scene, GaussianModel
-from scene.dataset_readers import _preload, fetchPly  # noqa
+from scene.dataset_readers import fetchPly
 from scene.gaussian_model import merge_gaussian_models
 from utils.background_helper import BackgroundPCDCreator
 from utils.loss_utils import (
@@ -103,8 +104,8 @@ def training(
     tra_cameras: t.List[Camera],
     test_cameras: t.List[Camera],
     writer: SummaryWriter,
-    optimizers: t.List[torch.optim.Optimizer],
-    end_of_iter_cbs: t.List[t.Callable],
+    optimizers: t.List[t.Union[torch.optim.Optimizer, None]],
+    end_of_iter_cbs: t.List[t.Union[t.Callable, None]],
     background: Tensor,
 ):
     camera_iterator = iterate_over_cameras(
@@ -114,7 +115,7 @@ def training(
         num_threads=6,
     )
 
-    indicator = tqdm(range(1, config.optimizer.iterations + 1))
+    indicator = tqdm(range(1, config.iterations + 1))
 
     for iteration in indicator:
         cur_camera = next(camera_iterator)
@@ -142,7 +143,7 @@ def training(
         image = image * mask
 
         Ll1 = (1.0 - config.optimizer.lambda_dssim) * yiq_color_space_loss(
-            image[None, ...], gt_image[None, ...], channel_weight=(0.75, 1, 1)
+            image[None, ...], gt_image[None, ...], channel_weight=(0.6, 1, 1)
         ) + config.optimizer.lambda_dssim * (
             1.0
             - ssim(
@@ -161,10 +162,14 @@ def training(
 
         # Optimizer step
         for cur_optimizer in optimizers:
+            if cur_optimizer is None:
+                continue
             cur_optimizer.step()
             cur_optimizer.zero_grad(set_to_none=True)
 
         for cb in end_of_iter_cbs:
+            if cb is None:
+                continue
             cb(iteration)
 
         indicator.set_postfix(
@@ -206,7 +211,7 @@ def training(
             size_threshold=5,
             gaussians=gaussians,
             scene=scene,
-            min_opacity=0.01,
+            min_opacity=config.optimizer.min_opacity,
         )
 
 
@@ -222,11 +227,11 @@ def main(
     print("Optimizing " + config.save_dir.as_posix())
 
     config.save_dir.mkdir(parents=True, exist_ok=True)
-    logger.add(config.save_dir / "log.log", level="TRACE", backtrace=True, diagnose=True)
-
-    Path(config.save_dir, "config.yaml").write_text(
-        yaml.dump(vars(config))
+    logger.add(
+        config.save_dir / "log.log", level="TRACE", backtrace=True, diagnose=True
     )
+
+    Path(config.save_dir, "config.yaml").write_text(yaml.dump(vars(config)))
 
     gaussians = GaussianModel(config.model.sh_degree)
 
@@ -263,7 +268,7 @@ def main(
 
     optimizer = gaussians.training_setup(config.optimizer)
 
-    pose_optimizer = scene.pose_optimizer(lr=config.optimizer.pose_lr_init)
+    pose_optimizer = scene.pose_optimizer(lr=config.control.pose_lr_init)
     pose_scheduler = torch.optim.lr_scheduler.StepLR(
         pose_optimizer, step_size=config.iterations // 4, gamma=0.5
     )
@@ -277,14 +282,12 @@ def main(
         bkg_pcd: o3d.geometry.PointCloud = BackgroundPCDCreator(
             gaussian_model=gaussians,
             background=background,
-            cameras=scene.getTrainCameras()[:],
+            cameras=scene.getTrainCameras()[::10],
             data_config=config.dataset,
             alpha_threshold=0.1,
             num_points=int(5e4),
         ).main()
-        o3d.io.write_point_cloud(
-            str(config.save_dir / "background_pcd.ply"), bkg_pcd
-        )
+        o3d.io.write_point_cloud(str(config.save_dir / "background_pcd.ply"), bkg_pcd)
         bkg_gaussians = GaussianModel(1)
         bkg_gaussians.create_from_pcd(
             bkg_pcd,
@@ -326,15 +329,13 @@ def main(
         tra_cameras=scene.getTrainCameras(),
         test_cameras=scene.getTestCameras(),
         writer=tb_writer,
-        optimizers=[
-            x for x in [pose_optimizer, optimizer, bkg_optimizer] if x is not None
-        ],
-        end_of_iter_cbs=[x for x in [
+        optimizers=[pose_optimizer, optimizer, bkg_optimizer],
+        end_of_iter_cbs=[
             update_lr_gs_callback,
             update_lr_bkg_gs_callback,
             update_lr_pose_callback,
             upgrade_sh_degree_callback,
-        ] if x is not None],
+        ],
     )
 
     camera_checkpoint = {x.image_id: x.state_dict() for x in scene.getTrainCameras()}
@@ -395,7 +396,9 @@ if __name__ == "__main__":
     #     force_centered_pp=False,
     #     eval_every_n_frame=45,
     # )
-    save_dir = Path("/home/jizong/workspace/data/bundleAdjustment_korea_scene2/subregion3/outputs/3dgs-pose-optimizer")
+    save_dir = Path(
+        "/home/jizong/workspace/data/bundleAdjustment_korea_scene2/subregion3/outputs/3dgs-pose-optimizer"
+    )
 
     colmap_config = ColmapDatasetConfig(
         image_dir=Path(
@@ -420,7 +423,6 @@ if __name__ == "__main__":
         eval_every_n_frame=45,
     )
     optimizer_config = OptimizerConfig(
-        iterations=28_000,
         position_lr_init=0.00002,
         position_lr_final=0.000002,
         position_lr_delay_mult=0.01,
@@ -436,10 +438,9 @@ if __name__ == "__main__":
         densify_from_iter=1000,
         densify_until_iter=20_000,
         densify_grad_threshold=0.00005,
-        pose_lr_init=5e-5,
+        min_opacity=1e-3,
     )
-    bkg_optimizer_config = OptimizerConfig(
-        iterations=16_000,
+    bkg_optimizer_config = BackgroundConfig(
         position_lr_init=0.00016,
         position_lr_final=0.000016,
         position_lr_delay_mult=0.01,
@@ -448,14 +449,12 @@ if __name__ == "__main__":
         opacity_lr=0.02,
         scaling_lr=0.002,
         rotation_lr=0.002,
-        percent_dense=0.01,
-        lambda_dssim=0.1,
-        densification_interval=200,
-        opacity_reset_interval=300000000,
-        densify_from_iter=50000000000,
-        densify_until_iter=10_000000,
-        densify_grad_threshold=1,
-        pose_lr_init=0e-5,
+    )
+    control_config = ControlConfig(
+        save_dir=save_dir,
+        num_evaluations=16,
+        include_0_epoch=True,
+        pose_lr_init=5e-5,
     )
 
     finetuneConfig = ExperimentConfig(
@@ -463,9 +462,7 @@ if __name__ == "__main__":
         dataset=colmap_config,
         optimizer=optimizer_config,
         bkg_optimizer=bkg_optimizer_config,
-        control=ControlConfig(
-            save_dir=save_dir, num_evaluations=16, include_0_epoch=True
-        ),
+        control=control_config,
     )
     config = tyro.cli(tyro.extras.subcommand_type_from_defaults({"ft": finetuneConfig}))
     main(config, pose_checkpoint_path=None, use_bkg_model=False)

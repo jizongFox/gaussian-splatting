@@ -184,8 +184,11 @@ class GaussianModel:
         features[:, 3:, 1:] = 0.0
         has_normal = False
 
-        if pcd.normals is not None and len(np.array(pcd.normals)) > 0 and np.all(
-                np.linalg.norm(np.array(pcd.normals), axis=-1) > 0.0):
+        if (
+            pcd.normals is not None
+            and len(np.array(pcd.normals)) > 0
+            and np.all(np.linalg.norm(np.array(pcd.normals), axis=-1) > 0.0)
+        ):
             logger.warning(f"using normal")
             # breakpoint()
             # has_normal = True
@@ -214,7 +217,7 @@ class GaussianModel:
         dist2 = torch.clamp(dist2, 0.0000001, max_sphere)
         scales = torch.log(torch.sqrt(dist2 / 3))[..., None].repeat(1, 3)
         if has_normal:
-            scales[:, 2] = torch.log(torch.exp(scales.max(dim=-1)[0]) / 100)
+            scales[:, 2] = torch.log(torch.exp(scales.max(dim=-1)[0]) / 3)
             # pass
         rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
         rots[:, 0] = 1
