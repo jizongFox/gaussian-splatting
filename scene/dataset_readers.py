@@ -97,7 +97,6 @@ def get_center_and_diag(cam_centers):
 
 
 def getNerfppNorm(cam_info):
-
     cam_centers = []
 
     for cam in cam_info:
@@ -114,11 +113,11 @@ def getNerfppNorm(cam_info):
 
 
 def readColmapCameras(
-    cam_extrinsics: t.Dict[int, Colmap_Image],
-    cam_intrinsics: t.Dict[int, Colmap_Camera],
-    *,
-    images_folder: str,
-    force_centered_pp: bool = False,
+        cam_extrinsics: t.Dict[int, Colmap_Image],
+        cam_intrinsics: t.Dict[int, Colmap_Camera],
+        *,
+        images_folder: str,
+        force_centered_pp: bool = False,
 ) -> t.List[CameraInfo]:
     cam_infos = []
     for idx, key in enumerate(cam_extrinsics):
@@ -234,12 +233,12 @@ def storePly(path, xyz, rgb):
 
 
 def readColmapSceneInfo(
-    path: str | Path,
-    image_dir: str | Path,
-    eval_mode: bool,
-    llffhold: int = 8,
-    load_pcd: bool = False,
-    force_centered_pp: bool = False,
+        path: str | Path,
+        image_dir: str | Path,
+        eval_mode: bool,
+        llffhold: int = 8,
+        load_pcd: bool = False,
+        force_centered_pp: bool = False,
 ):
     cam_intrinsics: t.Dict[int, Colmap_Camera]
     cam_extrinsics: t.Dict[int, Colmap_Image]
@@ -317,15 +316,15 @@ def readColmapSceneInfo(
 
 
 def _read_slam_intrinsic_and_extrinsic(
-    json_path: Path | str,
-    image_folder: Path | str,
-    output_convention: t.Literal["opencv", "slam"] = "opencv",
+        json_path: Path | str,
+        image_folder: Path | str,
+        output_convention: t.Literal["opencv", "slam"] = "opencv",
 ) -> t.Tuple[t.Dict[int, Colmap_Camera], t.Dict[int, Colmap_Image]]:
     json_path = Path(json_path)
     image_folder = Path(image_folder)
     assert json_path.exists(), f"Path {json_path} does not exist."
     assert (
-        image_folder.exists() and image_folder.is_dir()
+            image_folder.exists() and image_folder.is_dir()
     ), f"Path {image_folder} does not exist."
 
     with open(json_path, "r") as f:
@@ -336,7 +335,7 @@ def _read_slam_intrinsic_and_extrinsic(
     cameras = {}
 
     for camera_id, (cur_camera_name, camera_detail) in enumerate(
-        camera_calibrations.items()
+            camera_calibrations.items()
     ):
         model = "PINHOLE"
         width = camera_detail["intrinsics"]["width"]
@@ -457,19 +456,19 @@ def _read_slam_intrinsic_and_extrinsic(
 
 
 def readSlamSceneInfo(
-    json_path: str | Path,
-    image_dir: str | Path,
-    eval_mode: bool = True,
-    llffhold=8,
-    load_pcd: bool = False,
-    force_centered_pp: bool = False,
+        json_path: str | Path,
+        image_dir: str | Path,
+        eval_mode: bool = True,
+        llffhold=8,
+        load_pcd: bool = False,
+        force_centered_pp: bool = False,
 ) -> SceneInfo:
     assert Path(json_path).exists(), f"Path {json_path} does not exist."
 
     cam_intrinsics, cam_extrinsics = _read_slam_intrinsic_and_extrinsic(
         json_path=Path(json_path),
         image_folder=Path(image_dir),
-        output_convention="slam",
+        output_convention="opencv",
     )
     cam_infos_unsorted: t.List[CameraInfo] = readColmapCameras(
         cam_extrinsics=cam_extrinsics,
