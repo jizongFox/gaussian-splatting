@@ -48,7 +48,7 @@ def training(
     depth_criterion = SobelDepthLoss().cuda()
     # depth_criterion = ScaleAndShiftInvariantLoss()
 
-    for iteration in tqdm(range(0, config.optimizer.iterations + 1)):
+    for iteration in tqdm(range(0, config.iterations + 1)):
 
         cur_camera = next(camera_iters)
 
@@ -147,7 +147,6 @@ slam_config = SlamDatasetConfig(
 )
 
 optimizer_config = FinetuneOptimizerConfig(
-    iterations=12_000,
     position_lr_init=0.0000,
     position_lr_final=0.00000,
     position_lr_delay_mult=0.01,
@@ -163,6 +162,11 @@ optimizer_config = FinetuneOptimizerConfig(
     densify_from_iter=4000,
     densify_until_iter=12_000,
     densify_grad_threshold=0.00001,  # this is to split more
+)
+control = ControlConfig(
+    save_dir=save_dir,
+    num_evaluations=10,
+    iterations=12_000,
     pose_lr_init=2e-4,
 )
 
@@ -170,7 +174,7 @@ finetuneConfig = ExperimentConfig(
     model=ModelConfig(sh_degree=1, white_background=True),
     dataset=slam_config,
     optimizer=optimizer_config,
-    control=ControlConfig(save_dir=save_dir, num_evaluations=10),
+    control=control,
 )
 config = tyro.cli(tyro.extras.subcommand_type_from_defaults({"ft": finetuneConfig}))
 
@@ -210,7 +214,7 @@ logger.info(
 
 optimizer = gaussians.training_setup(config.optimizer)
 
-pose_optimizer = scene.pose_optimizer(lr=config.optimizer.pose_lr_init)
+pose_optimizer = scene.pose_optimizer(lr=config.control.pose_lr_init)
 pose_scheduler = torch.optim.lr_scheduler.StepLR(
     pose_optimizer, step_size=config.iterations // 4, gamma=0.75
 )
@@ -223,9 +227,7 @@ camera_iterator = iterate_over_cameras(
 )
 bg_color = [1, 1, 1] if config.model.white_background else [0, 0, 0]
 background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-tb_writer = prepare_output_and_logger(
-    config
-)
+tb_writer = prepare_output_and_logger(config)
 rich.print(config)
 training(
     config=config,
