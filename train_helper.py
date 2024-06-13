@@ -32,6 +32,7 @@ from scene.creator import Scene, GaussianModel
 from scene.dataset_readers import fetchPly
 from scene.gaussian_model import merge_gaussian_models
 from utils.background_helper import BackgroundPCDCreator
+from utils.exposure_utils import ExposureManager
 from utils.loss_utils import (
     ssim,
     yiq_color_space_loss,
@@ -45,16 +46,16 @@ from utils.train_utils import (
 
 
 def densification(
-    *,
-    gaussians: GaussianModel,
-    iteration: int,
-    scene: Scene,
-    optim_conf: OptimizerConfig,
-    radii: Tensor,
-    visibility_filter: Tensor,
-    viewspace_point_tensor: Tensor,
-    size_threshold: int = 12,
-    min_opacity: float = 0.001,
+        *,
+        gaussians: GaussianModel,
+        iteration: int,
+        scene: Scene,
+        optim_conf: OptimizerConfig,
+        radii: Tensor,
+        visibility_filter: Tensor,
+        viewspace_point_tensor: Tensor,
+        size_threshold: int = 12,
+        min_opacity: float = 0.001,
 ):
     # Densification
     if iteration < optim_conf.densify_until_iter:
@@ -68,8 +69,8 @@ def densification(
         # )
 
         if (
-            iteration > optim_conf.densify_from_iter
-            and iteration % optim_conf.densification_interval == 0
+                iteration > optim_conf.densify_from_iter
+                and iteration % optim_conf.densification_interval == 0
         ):
             logger.trace(f"calling densify_and_prune at iteration {iteration}")
             gaussians.densify_and_prune(
@@ -91,17 +92,18 @@ def densification(
 
 
 def training(
-    *,
-    config: ExperimentConfig,
-    gaussians: GaussianModel,
-    bkg_gaussian: GaussianModel | None = None,
-    scene: Scene,
-    tra_cameras: t.List[Camera],
-    test_cameras: t.List[Camera],
-    writer: SummaryWriter,
-    optimizers: t.List[t.Union[torch.optim.Optimizer, None]],
-    end_of_iter_cbs: t.List[t.Union[t.Callable, None]],
-    background: Tensor,
+        *,
+        config: ExperimentConfig,
+        gaussians: GaussianModel,
+        bkg_gaussian: GaussianModel | None = None,
+        scene: Scene,
+        tra_cameras: t.List[Camera],
+        test_cameras: t.List[Camera],
+        writer: SummaryWriter,
+        optimizers: t.List[t.Union[torch.optim.Optimizer, None]],
+        end_of_iter_cbs: t.List[t.Union[t.Callable, None]],
+        background: Tensor,
+        exposure_manager: ExposureManager | None = None
 ):
     camera_iterator = iterate_over_cameras(
         cameras=tra_cameras,
@@ -133,18 +135,19 @@ def training(
             render_pkg["alphas"],
         )
         # accum_alpha_mask = t.cast(Tensor, accum_alphas > 0.5).float()
-
+        if exposure_manager is not None:
+            image = exposure_manager(image, viewpoint_cam.image_name)
         gt_image = gt_image * mask
         image = image * mask
 
         Ll1 = (1.0 - config.optimizer.lambda_dssim) * yiq_color_space_loss(
             image[None, ...], gt_image[None, ...], channel_weight=(0.6, 1, 1)
         ) + config.optimizer.lambda_dssim * (
-            1.0
-            - ssim(
-                image,
-                gt_image,
-            )
+                1.0
+                - ssim(
+            image,
+            gt_image,
+        )
         )
 
         # if iteration > opt.densify_until_iter:
@@ -160,6 +163,9 @@ def training(
                 writer.add_scalar(
                     f"train/{cur_group['name']}", cur_group["lr"], iteration
                 )
+
+        if iteration % 50 == 0 and exposure_manager is not None:
+            exposure_manager.record_exps(writer, iteration=iteration)
 
         loss.backward()
 
@@ -198,9 +204,9 @@ def training(
             logger.info(f"Saving at iteration {iteration}")
 
             point_cloud_path = (
-                config.save_dir
-                / f"point_cloud/iteration_{iteration:06d}"
-                / "point_cloud.ply"
+                    config.save_dir
+                    / f"point_cloud/iteration_{iteration:06d}"
+                    / "point_cloud.ply"
             )
             new_gaussian = merge_gaussian_models(gaussians, bkg_gaussian)
             new_gaussian.save_ply(point_cloud_path)
@@ -219,9 +225,9 @@ def training(
 
 
 def main(
-    config: ExperimentConfig,
-    pose_checkpoint_path: Path | None = None,
-    use_bkg_model: bool = False,
+        config: ExperimentConfig,
+        pose_checkpoint_path: Path | None = None,
+        use_bkg_model: bool = False,
 ):
     rich.print(config)
     _hash = get_hash()
@@ -306,6 +312,13 @@ def main(
         bkg_gaussians = None
         bkg_optimizer = None
         update_lr_bkg_gs_callback = None
+    # ============================ exposure issue =========================
+    exposure_manager = ExposureManager(cameras=scene.getTrainCameras())
+    exposure_manager.cuda()
+    exposure_optimizer = exposure_manager.setup_optimizer(lr=5e-4, wd=1e-5)
+    exposure_scheduler = torch.optim.lr_scheduler.StepLR(
+        exposure_optimizer, step_size=config.iterations // 4, gamma=0.5
+    )
 
     # ============================ callbacks ===============================
     update_lr_gs_callback = lambda iteration: gaussians.update_learning_rate(  # noqa
@@ -313,6 +326,8 @@ def main(
     )
 
     update_lr_pose_callback = lambda iteration: pose_scheduler.step()  # noqa
+
+    update_lr_exp_callback = lambda iteration: exposure_scheduler.step()  # noqa
 
     def upgrade_sh_degree_callback(iteration):
         # Every 1000 its we increase the levels of SH up to a maximum degree
@@ -332,15 +347,16 @@ def main(
         tra_cameras=scene.getTrainCameras(),
         test_cameras=scene.getTestCameras(),
         writer=tb_writer,
-        optimizers=[pose_optimizer, optimizer, bkg_optimizer],
+        optimizers=[pose_optimizer, optimizer, bkg_optimizer, exposure_optimizer],
+        exposure_manager=exposure_manager,
         end_of_iter_cbs=[
             update_lr_gs_callback,
             update_lr_bkg_gs_callback,
             update_lr_pose_callback,
             upgrade_sh_degree_callback,
+            update_lr_exp_callback
         ],
     )
 
     camera_checkpoint = {x.image_id: x.state_dict() for x in scene.getTrainCameras()}
     torch.save(camera_checkpoint, config.save_dir / "camera_checkpoint.pth")
-
