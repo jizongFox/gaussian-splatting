@@ -1,5 +1,6 @@
 # this is to create a background dataset from a slam pcd.
 # or from the slam poses and images
+import contextlib
 import numpy as np
 import open3d as o3d
 import torch
@@ -18,20 +19,20 @@ from utils.train_utils import _iterate_over_cameras
 
 class BackgroundPCDCreator:
     def __init__(
-        self,
-        *,
-        gaussian_model: GaussianModel,
-        background: Tensor,
-        cameras: t.List[Camera],
-        data_config: DatasetConfig,
-        alpha_threshold: float = 0.7,
-        num_points: int = 1e4,
+            self,
+            *,
+            gaussian_model: GaussianModel,
+            background: Tensor,
+            cameras: t.List[Camera],
+            data_config: DatasetConfig,
+            alpha_threshold: float = 0.7,
+            num_points: int = 1e4,
     ):
         self.gaussians = gaussian_model
         self.background = background
         self.cameras = cameras.copy()
         assert (
-            data_config.depth_dir is not None
+                data_config.depth_dir is not None
         ), f"depth_dir is not set in {data_config}"
 
         self.camera_iter = _iterate_over_cameras(
@@ -42,7 +43,7 @@ class BackgroundPCDCreator:
 
     @torch.no_grad()
     def _get_accum_mask(
-        self, camera: Camera
+            self, camera: Camera
     ) -> t.Tuple[Float[Tensor, "1 h w"], Float[Tensor, "1 h w"]]:
 
         render_pkg = pose_depth_render(
@@ -65,23 +66,39 @@ class BackgroundPCDCreator:
         )
 
     @torch.no_grad()
-    def main(self) -> PointCloud:
+    def _main(self) -> PointCloud:
         batched_points = []
 
         for cur_camera_dict in tqdm(self.camera_iter):
             camera = cur_camera_dict["camera"]
-            # rel_depth = cur_camera_dict["depth"]
+            rel_depth = cur_camera_dict["depth"]
 
             abs_depth, visibility_mask = self._get_accum_mask(camera)
             if not torch.any(visibility_mask):
                 continue
 
             # compute the scale and shift coefficient from the rel and abs depths
+            from nerfstudio.utils.math import normalized_depth_scale_and_shift
             # scale, shift = normalized_depth_scale_and_shift(
-            #     rel_depth, abs_depth, visibility_mask
+            #     1 / rel_depth, 1 / (abs_depth + 1e-16), visibility_mask
             # )
-            # rescaled_depth = scale.view(-1, 1, 1) * rel_depth + shift.view(-1, 1, 1)
-            max_depth = abs_depth[visibility_mask].max() * 1.5
+            # rescaled_depth = 1 / (scale.view(-1, 1, 1) * 1 / rel_depth + shift.view(-1, 1, 1))
+
+            scale, shift = normalized_depth_scale_and_shift(
+                rel_depth, abs_depth + 1e-6, visibility_mask
+            )
+            rescaled_depth = scale.view(-1, 1, 1) * rel_depth + shift.view(-1, 1, 1)
+
+            current_depth = rescaled_depth[~visibility_mask] * 1.8
+            # import matplotlib.pyplot as plt
+            # plt.subplots(1, 2)
+            # plt.subplot(1, 2, 1)
+            # plt.imshow(abs_depth[0].detach().cpu().numpy())
+            # plt.subplot(1, 2, 2)
+            #
+            # plt.imshow(rescaled_depth[0].detach().cpu().numpy())
+            # plt.show()
+            # pass
 
             intrinsic = np.array(
                 [
@@ -91,14 +108,14 @@ class BackgroundPCDCreator:
                 ]
             )
             uv_grid = (
-                np.mgrid[
-                    0 : camera.image_width : 1, 0 : camera.image_height : 1
-                ].astype(np.float32)
-                + 0.5
+                    np.mgrid[
+                    0: camera.image_width: 1, 0: camera.image_height: 1
+                    ].astype(np.float32)
+                    + 0.5
             )
             uv_grid = uv_grid.transpose(0, -1, -2)[
-                0:, ~visibility_mask.detach().cpu().numpy()[0]
-            ]
+                      0:, ~visibility_mask.detach().cpu().numpy()[0]
+                      ]
             direction = np.einsum(
                 "ij, kj-> ki",
                 np.linalg.inv(intrinsic),
@@ -113,7 +130,7 @@ class BackgroundPCDCreator:
                 direction,
             )
             origin = camera.camera_center.detach().cpu().numpy()
-            points = origin + direction_in_world * max_depth.detach().cpu().numpy()
+            points = origin + direction_in_world * current_depth.detach().cpu().numpy()[..., None]
             batched_points.append(points)
 
         points = np.concatenate(batched_points)
@@ -121,7 +138,7 @@ class BackgroundPCDCreator:
             np.random.choice(points.shape[0], int(self.num_points), replace=False)
         ]
         colors = (
-            np.ones_like(points) * self.background.detach().cpu().numpy()[None, ...]
+                np.ones_like(points) * self.background.detach().cpu().numpy()[None, ...]
         )
         o3d_pcd = o3d.geometry.PointCloud()
         o3d_pcd.points = o3d.utility.Vector3dVector(points)
@@ -161,3 +178,17 @@ class BackgroundPCDCreator:
         # big_fig.show()
         #
         # exit()
+
+    def main(self):
+        with self.switch_opacity():
+            return self._main()
+
+    @contextlib.contextmanager
+    def switch_opacity(self):
+        new_opacity = torch.ones_like(self.gaussians.opacity) * 1000
+        old_opacity = self.gaussians._opacity
+
+        self.gaussians._opacity = new_opacity
+        yield
+
+        self.gaussians._opacity = old_opacity

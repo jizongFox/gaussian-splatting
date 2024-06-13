@@ -11,16 +11,16 @@
 import math
 import torch
 import typing
-from torch import Tensor
-
 from diff_gaussian_rasterization_w_pose_depth import (
     GaussianRasterizationSettings,
     GaussianRasterizer,
 )
+from torch import Tensor
+
 from utils.sh_utils import eval_sh
 
 if typing.TYPE_CHECKING:
-    from scene import Camera
+    from scene.cameras import Camera
     from scene.gaussian_model import GaussianModel
 
 

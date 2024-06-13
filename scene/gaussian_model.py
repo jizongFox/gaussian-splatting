@@ -80,7 +80,7 @@ class GaussianModel:
         self.max_radii2D = torch.empty(0)
         self.xyz_gradient_accum = torch.empty(0)
         self.denom = torch.empty(0)
-        self.optimizer = None
+        self.optimizer: torch.optim.Adam = None
         self.percent_dense = 0
         self.spatial_lr_scale = 0
         setup_functions(self)
@@ -246,7 +246,9 @@ class GaussianModel:
 
     def training_setup(self, training_args) -> torch.optim.Optimizer:
         assert self.spatial_lr_scale > 0, self.spatial_lr_scale
-        self.percent_dense = training_args.percent_dense
+        self.percent_dense = training_args.percent_dense if hasattr(
+            training_args, "percent_dense"
+        ) else 0.01
         self.xyz_gradient_accum = torch.zeros((self.xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.xyz.shape[0], 1), device="cuda")
 
@@ -290,6 +292,18 @@ class GaussianModel:
             lr_delay_mult=training_args.position_lr_delay_mult,
             max_steps=training_args.position_lr_max_steps,
         )
+        self._other_scheduler_args = {}  # noqa
+        for cur_group in l:
+            if cur_group["name"] == "xyz":
+                self._other_scheduler_args[cur_group["name"]] = self.xyz_scheduler_args
+            elif cur_group["name"] not in ["opacity", "f_dc", "f_rest"]:
+                self._other_scheduler_args[cur_group["name"]] = get_expon_lr_func(
+                    lr_init=cur_group["lr"],
+                    lr_final=cur_group["lr"] / 2,
+                    lr_delay_mult=training_args.position_lr_delay_mult,
+                    max_steps=training_args.position_lr_max_steps,
+                )
+
         return self.optimizer
 
     def update_learning_rate(self, iteration):
@@ -298,7 +312,12 @@ class GaussianModel:
             if param_group["name"] == "xyz":
                 lr = self.xyz_scheduler_args(iteration)
                 param_group["lr"] = lr
-                return lr
+            else:
+                try:
+                    lr = self._other_scheduler_args[param_group["name"]](iteration)
+                    param_group["lr"] = lr
+                except KeyError:
+                    continue
 
     def construct_list_of_attributes(self):
         l = ["x", "y", "z", "nx", "ny", "nz"]

@@ -158,6 +158,14 @@ def training(
         writer.add_scalar("train/pcd_size", len(gaussians), iteration)
         writer.add_scalar("train/sh_degree", gaussians.active_sh_degree, iteration)
 
+        if iteration % 10 == 0:
+            gaussians.optimizer = t.cast(torch.optim.Adam, gaussians.optimizer)
+
+            for cur_group in gaussians.optimizer.param_groups:
+                writer.add_scalar(
+                    f"train/{cur_group['name']}", cur_group["lr"], iteration
+                )
+
         loss.backward()
 
         # Optimizer step
@@ -397,28 +405,28 @@ if __name__ == "__main__":
     #     eval_every_n_frame=45,
     # )
     save_dir = Path(
-        "/home/jizong/workspace/data/bundleAdjustment_korea_scene2/subregion3/outputs/3dgs-pose-optimizer"
+        "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/outputs/3dgs-learning-rate-scheduler-2"
     )
 
     colmap_config = ColmapDatasetConfig(
         image_dir=Path(
-            "/home/jizong/workspace/data/bundleAdjustment_korea_scene2/subregion3/images"
+            "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/images"
         ),
         mask_dir=Path(
-            "/home/jizong/workspace/data/bundleAdjustment_korea_scene2/subregion3/masks-w-people"
+            "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/masks"
         ),
         # mask_dir=None,
         depth_dir=Path(
-            "/home/jizong/workspace/data/bundleAdjustment_korea_scene2/depths"
+            "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/depths"
         ),
         resolution=1,
         pcd_path=Path(
-            "/home/jizong/workspace/data/bundleAdjustment_korea_scene2/korea_accoms_outside-opencv.ply"
+            "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/korea_accoms_outside-opencv.ply"
         ),
         pcd_start_opacity=0.5,
         max_sphere_distance=1e-3,
         sparse_dir=Path(
-            "/home/jizong/workspace/data/bundleAdjustment_korea_scene2/colmaps/colmap-triangulation-vocab-tree/prior_sparse"
+            "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/colmap-simpler-alignment/sparse/0"
         ),
         eval_every_n_frame=45,
     )
@@ -429,8 +437,8 @@ if __name__ == "__main__":
         position_lr_max_steps=9_000,
         feature_lr=0.002,
         opacity_lr=0.025,
-        scaling_lr=0.0008,
-        rotation_lr=0.0005,
+        scaling_lr=0.002,
+        rotation_lr=0.002,
         percent_dense=0.01,
         lambda_dssim=0.2,
         densification_interval=200,
@@ -438,7 +446,7 @@ if __name__ == "__main__":
         densify_from_iter=1000,
         densify_until_iter=20_000,
         densify_grad_threshold=0.00005,
-        min_opacity=1e-3,
+        min_opacity=2e-3,
     )
     bkg_optimizer_config = BackgroundConfig(
         position_lr_init=0.00016,
@@ -451,10 +459,11 @@ if __name__ == "__main__":
         rotation_lr=0.002,
     )
     control_config = ControlConfig(
+        iterations=28_000,
         save_dir=save_dir,
         num_evaluations=16,
         include_0_epoch=True,
-        pose_lr_init=5e-5,
+        pose_lr_init=0e-5,
     )
 
     finetuneConfig = ExperimentConfig(
@@ -465,4 +474,4 @@ if __name__ == "__main__":
         control=control_config,
     )
     config = tyro.cli(tyro.extras.subcommand_type_from_defaults({"ft": finetuneConfig}))
-    main(config, pose_checkpoint_path=None, use_bkg_model=False)
+    main(config, pose_checkpoint_path=None, use_bkg_model=True)
