@@ -1,8 +1,9 @@
+import numpy as np
 import tinycudann as tcnn
 import torch
 import typing as t
 from functools import lru_cache
-from torch import nn
+from torch import nn, Tensor
 from torch.utils.tensorboard import SummaryWriter
 
 if t.TYPE_CHECKING:
@@ -74,20 +75,34 @@ class ExposureManager2(nn.Module):
 
 
 class ExposureGrid(nn.Module):
-    def __init__(self, cameras: t.List["Camera"], ):
+    def __init__(self, cameras: t.List["Camera"], anchor_image_num: int = 10):
         super().__init__()
         self.cameras = cameras
         self._image_names = [x.image_name for x in self.cameras]
+
+        self._anchor_image_num = anchor_image_num
+        np.random.seed(1)
+        self._anchor_image_names = [
+            self._image_names[x] for x in
+            np.random.permutation(range(len(self._image_names)))[:self._anchor_image_num]
+        ]
 
         encode_config = {"otype": "HashGrid", "n_levels": 4, "n_features_per_level": 2, "log2_hashmap_size": 15,
                          "base_resolution": 8, "per_level_scale": 1.5}
         network_config = {"otype": "FullyFusedMLP", "activation": "ReLU", "output_activation": "None", "n_neurons": 16,
                           "n_hidden_layers": 1}
 
-        initial_grid_network = lambda: tcnn.NetworkWithInputEncoding(2, n_output_dims=12, encoding_config=encode_config,
-                                                                     network_config=network_config)
+        initial_grid_network = lambda: tcnn.NetworkWithInputEncoding(  # noqa
+            n_input_dims=2,
+            n_output_dims=12,
+            encoding_config=encode_config,
+            network_config=network_config
+        )
 
         self.encoding_dict = nn.ParameterDict({k: initial_grid_network() for k in self._image_names})
+
+        self.storage = {}
+        self.cur_affine: Tensor = None
 
     def forward(self, rendered_image: torch.Tensor, image_name: str):
         grid = self.encoding_dict[image_name]
@@ -100,11 +115,14 @@ class ExposureGrid(nn.Module):
         delta_affine = delta_affine + affine_transform
         correct_image = torch.einsum("cwh,whcl->lwh", rendered_image, delta_affine[..., :3].float())
 
-        correct_image = torch.pow(correct_image + delta_affine[..., 3].float().permute(2, 0, 1), 1)
-
-        self.diff = (rendered_image - correct_image).abs().mean(dim=0)
-
+        if image_name in self._anchor_image_names:
+            diff = (rendered_image - correct_image).abs().mean(dim=0).detach()
+            self.store(image_name, diff)
+        self.cur_affine = affine_transform
         return correct_image
+
+    def store(self, image_name: str, diff: Tensor):
+        self.storage[image_name] = diff
 
     @staticmethod
     @lru_cache()
@@ -119,4 +137,14 @@ class ExposureGrid(nn.Module):
         return torch.optim.Adam(self.parameters(), lr=lr, weight_decay=wd)
 
     def record_exps(self, tensorboard: SummaryWriter, iteration: int):
-        tensorboard.add_image(tag="type3", img_tensor=self.diff[None, ...], global_step=iteration)
+        for image_name, diff_image in self.storage.copy().items():
+            tensorboard.add_image(tag=f"type3/{image_name}", img_tensor=diff_image[None, ...], global_step=iteration)
+            del self.storage[image_name]
+
+    def loss_callback(self, iteration: int, writer: SummaryWriter = None):
+        if self.cur_affine is None:
+            loss = torch.tensor(0.0, device="cuda", dtype=torch.float32)
+        else:
+            loss = torch.abs(self.cur_affine).mean()
+        writer.add_scalar("loss/affine", loss, global_step=iteration)
+        return loss * 1e-3

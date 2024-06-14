@@ -15,6 +15,7 @@ import rich
 import torch
 import typing as t
 import yaml
+from functools import partial
 from itertools import chain
 from loguru import logger
 from pathlib import Path
@@ -102,6 +103,7 @@ def training(
         writer: SummaryWriter,
         optimizers: t.List[t.Union[torch.optim.Optimizer, None]],
         end_of_iter_cbs: t.List[t.Union[t.Callable, None]],
+        loss_cbs: t.List[t.Callable, None] | None = None,
         background: Tensor,
         exposure_manager: ExposureManager | None = None
 ):
@@ -165,6 +167,12 @@ def training(
 
         if iteration % 50 == 0 and exposure_manager is not None:
             exposure_manager.record_exps(writer, iteration=iteration)
+
+        for cur_loss_cb in loss_cbs:
+            if cur_loss_cb is None:
+                continue
+            cur_loss = cur_loss_cb(iteration)
+            loss = loss + cur_loss
 
         loss.backward()
 
@@ -315,9 +323,9 @@ def main(
     # ============================ exposure issue =========================
     exposure_manager = ExposureGrid(cameras=scene.getTrainCameras())
     exposure_manager.cuda()
-    exposure_optimizer = exposure_manager.setup_optimizer(lr=1e-3, wd=1e-5)
+    exposure_optimizer = exposure_manager.setup_optimizer(lr=5e-2, wd=1e-4)
     exposure_scheduler = torch.optim.lr_scheduler.StepLR(
-        exposure_optimizer, step_size=config.iterations // 4, gamma=0.5
+        exposure_optimizer, step_size=config.iterations // 3, gamma=0.5
     )
 
     # ============================ callbacks ===============================
@@ -337,7 +345,6 @@ def main(
                 bkg_gaussians.oneupSHdegree()
 
     # ============================ callbacks ===============================
-
     training(
         config=config,
         gaussians=gaussians,
@@ -356,6 +363,7 @@ def main(
             upgrade_sh_degree_callback,
             update_lr_exp_callback
         ],
+        loss_cbs=[partial(exposure_manager.loss_callback, writer=tb_writer)],
     )
 
     camera_checkpoint = {x.image_id: x.state_dict() for x in scene.getTrainCameras()}
