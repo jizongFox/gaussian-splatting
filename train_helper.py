@@ -19,7 +19,7 @@ from functools import partial
 from itertools import chain
 from loguru import logger
 from pathlib import Path
-from torch import Tensor
+from torch import Tensor, nn
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -142,14 +142,17 @@ def training(
         gt_image = gt_image * mask
         image = image * mask
 
-        Ll1 = (1.0 - config.optimizer.lambda_dssim) * yiq_color_space_loss(
-            image[None, ...], gt_image[None, ...], channel_weight=(1, 1, 1)
-        ) + config.optimizer.lambda_dssim * (
-                      1.0
-                      - ssim(
-                  image,
-                  gt_image)
-              )
+        yiq_loss = yiq_color_space_loss(
+            image[None, ...], gt_image[None, ...], channel_weight=(0.6, 1, 1)
+        )
+        rgb_loss = nn.L1Loss()(image, gt_image)
+
+        Ll1 = (1.0 - config.optimizer.lambda_dssim) * (yiq_loss + rgb_loss) / 2 + config.optimizer.lambda_dssim * (
+                1.0
+                - ssim(
+            image,
+            gt_image)
+        )
 
         # if iteration > opt.densify_until_iter:
         loss = Ll1
