@@ -321,7 +321,7 @@ def main(
         bkg_optimizer = None
         update_lr_bkg_gs_callback = None
     # ============================ exposure issue =========================
-    exposure_manager = ExposureGrid(cameras=scene.getTrainCameras())
+    exposure_manager = ExposureGrid(cameras=scene.getTrainCameras(), anchor_cameras=scene.getTrainCameras()[::100])
     exposure_manager.cuda()
     exposure_optimizer = exposure_manager.setup_optimizer(lr=5e-2, wd=1e-4)
     exposure_scheduler = torch.optim.lr_scheduler.StepLR(

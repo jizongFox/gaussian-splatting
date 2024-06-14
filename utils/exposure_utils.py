@@ -1,4 +1,3 @@
-import numpy as np
 import tinycudann as tcnn
 import torch
 import typing as t
@@ -75,19 +74,16 @@ class ExposureManager2(nn.Module):
 
 
 class ExposureGrid(nn.Module):
-    def __init__(self, cameras: t.List["Camera"], anchor_image_num: int = 10):
+    def __init__(self, cameras: t.List["Camera"], anchor_cameras: t.List["Camera"]):
         super().__init__()
         self.cameras = cameras
         self._image_names = [x.image_name for x in self.cameras]
 
-        self._anchor_image_num = anchor_image_num
-        np.random.seed(1)
         self._anchor_image_names = [
-            self._image_names[x] for x in
-            np.random.permutation(range(len(self._image_names)))[:self._anchor_image_num]
+            x.image_name for x in anchor_cameras
         ]
 
-        encode_config = {"otype": "HashGrid", "n_levels": 4, "n_features_per_level": 2, "log2_hashmap_size": 15,
+        encode_config = {"otype": "HashGrid", "n_levels": 2, "n_features_per_level": 2, "log2_hashmap_size": 15,
                          "base_resolution": 8, "per_level_scale": 1.5}
         network_config = {"otype": "FullyFusedMLP", "activation": "ReLU", "output_activation": "None", "n_neurons": 16,
                           "n_hidden_layers": 1}
@@ -137,9 +133,9 @@ class ExposureGrid(nn.Module):
         return torch.optim.Adam(self.parameters(), lr=lr, weight_decay=wd)
 
     def record_exps(self, tensorboard: SummaryWriter, iteration: int):
-        for image_name, diff_image in self.storage.copy().items():
+        for image_name, diff_image in self.storage.items():
             tensorboard.add_image(tag=f"type3/{image_name}", img_tensor=diff_image[None, ...], global_step=iteration)
-            del self.storage[image_name]
+        self.storage = {}
 
     def loss_callback(self, iteration: int, writer: SummaryWriter = None):
         if self.cur_affine is None:
@@ -147,4 +143,4 @@ class ExposureGrid(nn.Module):
         else:
             loss = torch.abs(self.cur_affine).mean()
         writer.add_scalar("loss/affine", loss, global_step=iteration)
-        return loss * 1e-3
+        return loss * 1e-1
