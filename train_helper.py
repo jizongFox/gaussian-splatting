@@ -32,7 +32,7 @@ from scene.creator import Scene, GaussianModel
 from scene.dataset_readers import fetchPly
 from scene.gaussian_model import merge_gaussian_models
 from utils.background_helper import BackgroundPCDCreator
-from utils.exposure_utils import ExposureManager
+from utils.exposure_utils import ExposureManager, ExposureGrid
 from utils.loss_utils import (
     ssim,
     yiq_color_space_loss,
@@ -141,14 +141,13 @@ def training(
         image = image * mask
 
         Ll1 = (1.0 - config.optimizer.lambda_dssim) * yiq_color_space_loss(
-            image[None, ...], gt_image[None, ...], channel_weight=(0.6, 1, 1)
+            image[None, ...], gt_image[None, ...], channel_weight=(1, 1, 1)
         ) + config.optimizer.lambda_dssim * (
-                1.0
-                - ssim(
-            image,
-            gt_image,
-        )
-        )
+                      1.0
+                      - ssim(
+                  image,
+                  gt_image)
+              )
 
         # if iteration > opt.densify_until_iter:
         loss = Ll1
@@ -250,6 +249,7 @@ def main(
         save_dir=config.save_dir,
         load_iteration=None,
     )
+    logger.info(f"scene scale: {scene.cameras_extent}")
 
     if pose_checkpoint_path is not None:
         poses_checkpoint = torch.load(pose_checkpoint_path)
@@ -313,9 +313,9 @@ def main(
         bkg_optimizer = None
         update_lr_bkg_gs_callback = None
     # ============================ exposure issue =========================
-    exposure_manager = ExposureManager(cameras=scene.getTrainCameras())
+    exposure_manager = ExposureGrid(cameras=scene.getTrainCameras())
     exposure_manager.cuda()
-    exposure_optimizer = exposure_manager.setup_optimizer(lr=5e-4, wd=1e-5)
+    exposure_optimizer = exposure_manager.setup_optimizer(lr=1e-3, wd=1e-5)
     exposure_scheduler = torch.optim.lr_scheduler.StepLR(
         exposure_optimizer, step_size=config.iterations // 4, gamma=0.5
     )
@@ -360,3 +360,5 @@ def main(
 
     camera_checkpoint = {x.image_id: x.state_dict() for x in scene.getTrainCameras()}
     torch.save(camera_checkpoint, config.save_dir / "camera_checkpoint.pth")
+    if exposure_manager is not None:
+        torch.save(exposure_manager.state_dict(), config.save_dir / "exposure_manager.pth")
