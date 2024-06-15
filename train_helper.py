@@ -38,12 +38,15 @@ from utils.loss_utils import (
     ssim,
     yiq_color_space_loss,
 )
+from utils.perceptual_loss import VGGLoss
 from utils.system_utils import get_hash
 from utils.train_utils import (
     prepare_output_and_logger,
     iterate_over_cameras,
     report_status,
 )
+
+vgg_loss = VGGLoss().cuda()
 
 
 def densification(
@@ -154,8 +157,10 @@ def training(
             gt_image)
         )
 
+        perceptual_loss = vgg_loss(image[None, ...], gt_image[None, ...])
+
         # if iteration > opt.densify_until_iter:
-        loss = Ll1
+        loss = Ll1 + 0.1 * perceptual_loss
 
         writer.add_scalar("train/pcd_size", len(gaussians), iteration)
         writer.add_scalar("train/sh_degree", gaussians.active_sh_degree, iteration)
@@ -278,7 +283,7 @@ def main(
             config.dataset.pcd_path.as_posix(),
             remove_rgb_color=config.dataset.remove_pcd_color,
         ),
-        spatial_lr_scale=scene.cameras_extent,
+        spatial_lr_scale=20.0,
         max_sphere=config.dataset.max_sphere_distance,
         start_opacity=config.dataset.pcd_start_opacity,
     )
@@ -311,7 +316,7 @@ def main(
         bkg_gaussians = GaussianModel(1)
         bkg_gaussians.create_from_pcd(
             bkg_pcd,
-            spatial_lr_scale=scene.cameras_extent,
+            spatial_lr_scale=20.0,
             max_sphere=1.0,
             start_opacity=0.1,
         )
