@@ -143,4 +143,4 @@ class ExposureGrid(nn.Module):
         else:
             loss = torch.abs(self.cur_affine).mean()
         writer.add_scalar("loss/affine", loss, global_step=iteration)
-        return loss * 1e-1
+        return loss * 1e-2

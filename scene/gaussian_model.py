@@ -265,7 +265,7 @@ class GaussianModel:
             },
             {
                 "params": [self._features_rest],
-                "lr": training_args.feature_lr / 200000000.0,
+                "lr": training_args.feature_lr / 20,
                 "name": "f_rest",
             },
             {

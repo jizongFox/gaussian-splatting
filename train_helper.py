@@ -142,6 +142,8 @@ def training(
             render_pkg["alphas"],
         )
         # accum_alpha_mask = t.cast(Tensor, accum_alphas > 0.5).float()
+        ssim_loss = 1.0 - ssim(image, gt_image)
+
         if exposure_manager is not None:
             image = exposure_manager(image, viewpoint_cam.image_name)
         gt_image = gt_image * mask
@@ -151,18 +153,13 @@ def training(
             image[None, ...], gt_image[None, ...], channel_weight=(0.6, 1, 1)
         )
         rgb_loss = nn.L1Loss()(image, gt_image)
+        Ll1 = (1.0 - config.optimizer.lambda_dssim) * (
+                yiq_loss + rgb_loss) / 2 + config.optimizer.lambda_dssim * ssim_loss
 
-        Ll1 = (1.0 - config.optimizer.lambda_dssim) * (yiq_loss + rgb_loss) / 2 + config.optimizer.lambda_dssim * (
-                1.0
-                - ssim(
-            image,
-            gt_image)
-        )
-
-        perceptual_loss = vgg_loss(image[None, ...], gt_image[None, ...])
+        # perceptual_loss = vgg_loss(image[None, ...], gt_image[None, ...])
 
         # if iteration > opt.densify_until_iter:
-        loss = Ll1 + 0.1 * perceptual_loss
+        loss = Ll1
 
         writer.add_scalar("train/pcd_size", len(gaussians), iteration)
         writer.add_scalar("train/sh_degree", gaussians.active_sh_degree, iteration)
@@ -307,6 +304,9 @@ def main(
 
     bg_color = [1, 1, 1] if config.model.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+    # using random background
+    background = torch.rand(3, device="cuda", dtype=torch.float32)
+
     tb_writer = prepare_output_and_logger(config)
     if use_bkg_model:
         logger.info("Using background model")
@@ -338,9 +338,9 @@ def main(
     # ============================ exposure issue =========================
     exposure_manager = ExposureGrid(cameras=scene.getTrainCameras(), anchor_cameras=scene.getTrainCameras()[::100])
     exposure_manager.cuda()
-    exposure_optimizer = exposure_manager.setup_optimizer(lr=5e-2, wd=1e-4)
+    exposure_optimizer = exposure_manager.setup_optimizer(lr=8e-2, wd=1e-3)
     exposure_scheduler = torch.optim.lr_scheduler.StepLR(
-        exposure_optimizer, step_size=config.iterations // 3, gamma=0.5
+        exposure_optimizer, step_size=config.iterations, gamma=0.5
     )
 
     # ============================ callbacks ===============================

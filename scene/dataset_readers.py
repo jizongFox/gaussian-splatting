@@ -296,8 +296,8 @@ def readColmapSceneInfo(
             xyz, rgb, _ = read_points3D_binary(bin_path)
         else:
             xyz, rgb, _ = read_points3D_text(txt_path)
-        mask = np.linalg.norm(xyz, axis=-1) <= 50
-        xyz, rgb = xyz[mask], rgb[mask]
+        # mask = np.linalg.norm(xyz, axis=-1) <= 50
+        # xyz, rgb = xyz[mask], rgb[mask]
         storePly(ply_path, xyz, rgb)
 
     if load_pcd:
