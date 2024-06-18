@@ -78,27 +78,11 @@ class BackgroundPCDCreator:
                 continue
 
             # compute the scale and shift coefficient from the rel and abs depths
-            from nerfstudio.utils.math import normalized_depth_scale_and_shift
             # scale, shift = normalized_depth_scale_and_shift(
-            #     1 / rel_depth, 1 / (abs_depth + 1e-16), visibility_mask
+            #     rel_depth, abs_depth, visibility_mask
             # )
-            # rescaled_depth = 1 / (scale.view(-1, 1, 1) * 1 / rel_depth + shift.view(-1, 1, 1))
-
-            scale, shift = normalized_depth_scale_and_shift(
-                rel_depth, abs_depth + 1e-6, visibility_mask
-            )
-            rescaled_depth = scale.view(-1, 1, 1) * rel_depth + shift.view(-1, 1, 1)
-
-            current_depth = rescaled_depth[~visibility_mask] * 1.8
-            # import matplotlib.pyplot as plt
-            # plt.subplots(1, 2)
-            # plt.subplot(1, 2, 1)
-            # plt.imshow(abs_depth[0].detach().cpu().numpy())
-            # plt.subplot(1, 2, 2)
-            #
-            # plt.imshow(rescaled_depth[0].detach().cpu().numpy())
-            # plt.show()
-            # pass
+            # rescaled_depth = scale.view(-1, 1, 1) * rel_depth + shift.view(-1, 1, 1)
+            max_depth = abs_depth[visibility_mask].max() * 1.5
 
             intrinsic = np.array(
                 [
@@ -108,14 +92,14 @@ class BackgroundPCDCreator:
                 ]
             )
             uv_grid = (
-                    np.mgrid[
-                    0: camera.image_width: 1, 0: camera.image_height: 1
-                    ].astype(np.float32)
-                    + 0.5
+                np.mgrid[
+                    0 : camera.image_width : 1, 0 : camera.image_height : 1
+                ].astype(np.float32)
+                + 0.5
             )
             uv_grid = uv_grid.transpose(0, -1, -2)[
-                      0:, ~visibility_mask.detach().cpu().numpy()[0]
-                      ]
+                0:, ~visibility_mask.detach().cpu().numpy()[0]
+            ]
             direction = np.einsum(
                 "ij, kj-> ki",
                 np.linalg.inv(intrinsic),
@@ -130,9 +114,8 @@ class BackgroundPCDCreator:
                 direction,
             )
             origin = camera.camera_center.detach().cpu().numpy()
-            points = origin + direction_in_world * current_depth.detach().cpu().numpy()[..., None]
+            points = origin + direction_in_world * max_depth.detach().cpu().numpy()
             batched_points.append(points)
-
         points = np.concatenate(batched_points)
         points = points[
             np.random.choice(points.shape[0], int(self.num_points), replace=False)
