@@ -10,15 +10,16 @@
 #
 from __future__ import annotations
 
+import typing as t
+from functools import partial
+from itertools import chain
+from pathlib import Path
+
 import open3d as o3d
 import rich
 import torch
-import typing as t
 import yaml
-from functools import partial
-from itertools import chain
 from loguru import logger
-from pathlib import Path
 from torch import Tensor, nn
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -33,6 +34,7 @@ from scene.creator import Scene, GaussianModel
 from scene.dataset_readers import fetchPly
 from scene.gaussian_model import merge_gaussian_models
 from utils.background_helper import BackgroundPCDCreator
+from utils.camera_utils import camera_metrics
 from utils.exposure_utils import ExposureManager, ExposureGrid
 from utils.loss_utils import (
     ssim,
@@ -175,6 +177,11 @@ def training(
 
         if iteration % 50 == 0 and exposure_manager is not None:
             exposure_manager.record_exps(writer, iteration=iteration)
+
+        if iteration % 10 == 0:
+            camera_opt = camera_metrics(tra_cameras)
+            for key, value in camera_opt.items():
+                writer.add_scalar(f"train/opt_{key}", value, iteration)
 
         for cur_loss_cb in loss_cbs:
             if cur_loss_cb is None:

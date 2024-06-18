@@ -10,17 +10,16 @@
 #
 
 import typing as t
+
+import torch
 from tqdm import tqdm
 
 from scene.cameras import Camera
 from scene.dataset_readers import CameraInfo
 from utils.graphics_utils import fov2focal
 
-WARNED = False
-
 
 def loadCam(downsample: int, id: int, cam_info: CameraInfo, resolution_scale) -> Camera:
-
     (cx, cy) = (cam_info.cx / downsample, cam_info.cy / downsample)
     focal_length_x, focal_length_y = (
         cam_info.focal_x / downsample,
@@ -94,3 +93,48 @@ def camera_to_JSON(id, camera: CameraInfo):
         "cy": camera.cy,
     }
     return camera_entry
+
+
+import math
+
+
+def euler_from_quaternion(x, y, z, w):
+    """
+    Convert a quaternion into euler angles (roll, pitch, yaw)
+    roll is rotation around x in radians (counterclockwise)
+    pitch is rotation around y in radians (counterclockwise)
+    yaw is rotation around z in radians (counterclockwise)
+    """
+    t0 = +2.0 * (w * x + y * z)
+    t1 = +1.0 - 2.0 * (x * x + y * y)
+    roll_x = math.atan2(t0, t1)
+
+    t2 = +2.0 * (w * y - z * x)
+    t2 = +1.0 if t2 > +1.0 else t2
+    t2 = -1.0 if t2 < -1.0 else t2
+    pitch_y = math.asin(t2)
+
+    t3 = +2.0 * (w * z + x * y)
+    t4 = +1.0 - 2.0 * (y * y + z * z)
+    yaw_z = math.atan2(t3, t4)
+
+    return roll_x, pitch_y, yaw_z  # in radians
+
+
+def camera_metrics(cameras: t.List[Camera]):
+    translation = torch.cat([x.delta_t for x in cameras])
+    rotation = torch.cat([x.delta_quat for x in cameras])
+
+    transalation_max = translation.max()
+    transalation_mean = translation.mean()
+
+    degrees = [euler_from_quaternion(*x[[1, 2, 3, 0]]) for x in rotation]
+    degrees_mean = torch.tensor(degrees).mean()
+    degrees_max = torch.tensor(degrees).max()
+
+    return {
+        "translation_max": float(transalation_max),
+        "translation_mean": float(transalation_mean),
+        "rotation_mean": float(degrees_mean),
+        "rotation_max": float(degrees_max),
+    }
