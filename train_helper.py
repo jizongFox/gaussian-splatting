@@ -298,9 +298,9 @@ def main(
     optimizer = gaussians.training_setup(config.optimizer)
 
     pose_optimizer = scene.pose_optimizer(lr=config.control.pose_lr_init)
-    pose_scheduler = torch.optim.lr_scheduler.StepLR(
-        pose_optimizer, step_size=config.iterations // 4, gamma=0.5
-    )
+    k = config.iterations / 5
+    gamma = (1 / 2) ** (1 / k)
+    pose_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma)
 
     bg_color = [1, 1, 1] if config.model.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
@@ -350,6 +350,10 @@ def main(
 
     update_lr_pose_callback = lambda iteration: pose_scheduler.step()  # noqa
 
+    def write_pose_optimizer_lr(iteration):
+        if iteration % 10 == 0:
+            tb_writer.add_scalar("train/pose_lr", pose_optimizer.param_groups[0]["lr"], iteration)
+
     update_lr_exp_callback = lambda iteration: exposure_scheduler.step()  # noqa
 
     def upgrade_sh_degree_callback(iteration):
@@ -376,7 +380,8 @@ def main(
             update_lr_bkg_gs_callback,
             update_lr_pose_callback,
             upgrade_sh_degree_callback,
-            update_lr_exp_callback
+            update_lr_exp_callback,
+            write_pose_optimizer_lr
         ],
         loss_cbs=[partial(exposure_manager.loss_callback, writer=tb_writer)],
     )
