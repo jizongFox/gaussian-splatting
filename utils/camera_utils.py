@@ -125,8 +125,8 @@ def camera_metrics(cameras: t.List[Camera]):
     translation = torch.cat([x.delta_t for x in cameras])
     rotation = torch.cat([x.delta_quat for x in cameras])
 
-    transalation_max = translation.max()
-    transalation_mean = translation.mean()
+    transalation_max = translation.norm(dim=-1).max()
+    transalation_mean = translation.norm(dim=-1).mean()
 
     degrees = [euler_from_quaternion(*x[[1, 2, 3, 0]]) for x in rotation]
     degrees_mean = torch.tensor(degrees).mean()
