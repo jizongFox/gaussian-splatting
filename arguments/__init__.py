@@ -53,7 +53,7 @@ class ParamGroup:
 
 class ModelParams(ParamGroup):
     def __init__(self, parser, sentinel=False):
-        self.sh_degree = 2
+        self.sh_degree = 1
         self._source_path = ""
         self._model_path = ""
         self._images = "images"
@@ -61,6 +61,7 @@ class ModelParams(ParamGroup):
         self._white_background = True
         self.data_device = "cuda"
         self.eval = True
+        self.remove_rgb_color = False
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -122,14 +123,14 @@ class OptimizationFinetuneParams(ParamGroup):
 class ICommaOptimizationParams(ParamGroup):
     def __init__(self, parser):
         self.iterations = 15_000
-        self.position_lr_init = 0.00000
-        self.position_lr_final = 0.000000016
+        self.position_lr_init = 0.00016
+        self.position_lr_final = 0.000016
         self.position_lr_delay_mult = 0.01
         self.position_lr_max_steps = 30_000
-        self.feature_lr = 0.0025
+        self.feature_lr = 0.025
         self.opacity_lr = 0.05
-        self.scaling_lr = 0.00005
-        self.rotation_lr = 0.0005
+        self.scaling_lr = 0.005
+        self.rotation_lr = 0.005
         self.percent_dense = 0.01  # this is to reduce the size of the eclipse
         self.lambda_dssim = 0.2
         self.densification_interval = 500

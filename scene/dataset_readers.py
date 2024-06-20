@@ -19,6 +19,7 @@ import typing as t
 from PIL import Image
 from dataclasses import dataclass
 from functools import lru_cache
+from itertools import chain
 from jaxtyping import Float
 from loguru import logger
 from pathlib import Path
@@ -37,8 +38,7 @@ from scene.colmap_loader import (
 )
 from scene.gaussian_model import BasicPointCloud
 from scene.helper import SE3_to_quaternion_and_translation_torch
-from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
-from utils.sh_utils import SH2RGB
+from utils.graphics_utils import getWorld2View2, focal2fov
 
 
 def _read_image(filename):
@@ -97,7 +97,6 @@ def get_center_and_diag(cam_centers):
 
 
 def getNerfppNorm(cam_info):
-
     cam_centers = []
 
     for cam in cam_info:
@@ -114,9 +113,11 @@ def getNerfppNorm(cam_info):
 
 
 def readColmapCameras(
-    cam_extrinsics: t.Dict[int, Colmap_Image],
-    cam_intrinsics: t.Dict[int, Colmap_Camera],
-    images_folder: str,
+        cam_extrinsics: t.Dict[int, Colmap_Image],
+        cam_intrinsics: t.Dict[int, Colmap_Camera],
+        *,
+        images_folder: str,
+        force_centered_pp: bool = False,
 ) -> t.List[CameraInfo]:
     cam_infos = []
     for idx, key in enumerate(cam_extrinsics):
@@ -135,19 +136,27 @@ def readColmapCameras(
         T = np.array(extr.tvec)  # here the T is not -RT, T for w2c
 
         if intr.model == "SIMPLE_PINHOLE":
-            raise UserWarning("SIMPLE_PINHOLE cameras are not supported!")
+            raise RuntimeError("SIMPLE_PINHOLE cameras are not supported!")
             focal_length_x = intr.params[0]
             FovY = focal2fov(focal_length_x, height)
             FovX = focal2fov(focal_length_x, width)
-            cx = intr.params[2]
-            cy = intr.params[3]
+            if force_centered_pp:
+                cx = width / 2
+                cy = height / 2
+            else:
+                cx = intr.params[2]
+                cy = intr.params[3]
         elif intr.model == "PINHOLE":
             focal_length_x = intr.params[0]
             focal_length_y = intr.params[1]
             FovY = focal2fov(focal_length_y, height)
             FovX = focal2fov(focal_length_x, width)
-            cx = intr.params[2]
-            cy = intr.params[3]
+            if force_centered_pp:
+                cx = width / 2
+                cy = height / 2
+            else:
+                cx = intr.params[2]
+                cy = intr.params[3]
         else:
             assert False, (
                 "Colmap camera model not handled: "
@@ -181,15 +190,19 @@ def readColmapCameras(
     return cam_infos
 
 
-def fetchPly(path):
+def fetchPly(path: str | Path, remove_rgb_color: bool = False):
     plydata = PlyData.read(path)
     vertices = plydata["vertex"]
     positions = np.vstack([vertices["x"], vertices["y"], vertices["z"]]).T
     colors = np.vstack([vertices["red"], vertices["green"], vertices["blue"]]).T / 255.0
+    if remove_rgb_color:
+        logger.warning("Removing RGB colors from the point cloud.")
+        colors = np.zeros_like(colors)
     try:
         normals = np.vstack([vertices["nx"], vertices["ny"], vertices["nz"]]).T
     except ValueError:
         normals = None
+
     return BasicPointCloud(points=positions, colors=colors, normals=normals)
 
 
@@ -220,37 +233,47 @@ def storePly(path, xyz, rgb):
 
 
 def readColmapSceneInfo(
-    path, images, eval, llffhold=8, force_cxcy_center: bool = False
+        path: str | Path,
+        image_dir: str | Path,
+        eval_mode: bool,
+        llffhold: int = 8,
+        load_pcd: bool = False,
+        force_centered_pp: bool = False,
 ):
     cam_intrinsics: t.Dict[int, Colmap_Camera]
     cam_extrinsics: t.Dict[int, Colmap_Image]
-    try:
+
+    if Path(os.path.join(path, "images.bin")).exists():
         cameras_extrinsic_file = os.path.join(path, "images.bin")
         cameras_intrinsic_file = os.path.join(path, "cameras.bin")
         cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
         cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
-    except:
+    elif Path(os.path.join(path, "images.txt")).exists():
         cameras_extrinsic_file = os.path.join(path, "images.txt")
         cameras_intrinsic_file = os.path.join(path, "cameras.txt")
         cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
         cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
-    if force_cxcy_center:
-        logger.warning("Forcing cx and cy to be the center of the image.")
-        for key in cam_intrinsics:
-            cam_intrinsics[key].params[2] = cam_intrinsics[key].width / 2
-            cam_intrinsics[key].params[3] = cam_intrinsics[key].height / 2
+    else:
+        raise ValueError("No cameras file found.")
 
     cam_infos_unsorted: t.List[CameraInfo] = readColmapCameras(
         cam_extrinsics=cam_extrinsics,
         cam_intrinsics=cam_intrinsics,
-        images_folder=images,
+        images_folder=image_dir,
+        force_centered_pp=force_centered_pp,
     )
-    cam_infos = sorted(cam_infos_unsorted.copy(), key=lambda x: x.image_name)
+    cam_infos: t.List[CameraInfo] = sorted(
+        cam_infos_unsorted.copy(), key=lambda x: x.image_name
+    )
+    cam_infos = [x for x in cam_infos if Path(x.image_path).exists()]
 
     if os.environ.get("DEBUG", "0") == "1":
-        cam_infos = cam_infos[::2]
+        cam_infos = cam_infos[::4]
 
-    if eval:
+    train_cam_infos: t.List[CameraInfo]
+    test_cam_infos: t.List[CameraInfo]
+
+    if eval_mode:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
         test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
     else:
@@ -258,9 +281,10 @@ def readColmapSceneInfo(
         test_cam_infos = []
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
-    logger.info(f"nerf_normalization: {nerf_normalization}")
+    # logger.info(f"nerf_normalization: {nerf_normalization}")
 
     ply_path = os.path.join(path, "points3D.ply")
+
     bin_path = os.path.join(path, "points3D.bin")
     txt_path = os.path.join(path, "points3D.txt")
     if not os.path.exists(ply_path):
@@ -272,12 +296,13 @@ def readColmapSceneInfo(
             xyz, rgb, _ = read_points3D_binary(bin_path)
         else:
             xyz, rgb, _ = read_points3D_text(txt_path)
-        mask = np.linalg.norm(xyz, axis=-1) <= 50
-        xyz, rgb = xyz[mask], rgb[mask]
+        # mask = np.linalg.norm(xyz, axis=-1) <= 50
+        # xyz, rgb = xyz[mask], rgb[mask]
         storePly(ply_path, xyz, rgb)
-    try:
+
+    if load_pcd:
         pcd = fetchPly(ply_path)
-    except:
+    else:
         pcd = None
 
     scene_info = SceneInfo(
@@ -291,15 +316,15 @@ def readColmapSceneInfo(
 
 
 def _read_slam_intrinsic_and_extrinsic(
-    json_path: Path | str,
-    image_folder: Path | str,
-    output_convention: t.Literal["opencv", "slam"] = "opencv",
+        json_path: Path | str,
+        image_folder: Path | str,
+        output_convention: t.Literal["opencv", "slam"] = "opencv",
 ) -> t.Tuple[t.Dict[int, Colmap_Camera], t.Dict[int, Colmap_Image]]:
     json_path = Path(json_path)
     image_folder = Path(image_folder)
     assert json_path.exists(), f"Path {json_path} does not exist."
     assert (
-        image_folder.exists() and image_folder.is_dir()
+            image_folder.exists() and image_folder.is_dir()
     ), f"Path {image_folder} does not exist."
 
     with open(json_path, "r") as f:
@@ -310,7 +335,7 @@ def _read_slam_intrinsic_and_extrinsic(
     cameras = {}
 
     for camera_id, (cur_camera_name, camera_detail) in enumerate(
-        camera_calibrations.items()
+            camera_calibrations.items()
     ):
         model = "PINHOLE"
         width = camera_detail["intrinsics"]["width"]
@@ -330,7 +355,10 @@ def _read_slam_intrinsic_and_extrinsic(
     # del camera_id
 
     def iterate_word2cam_matrix(meta_file, image_folder):
-        available_image_names = [x.name for x in image_folder.glob("*.png")]
+        available_image_names = [
+            x.relative_to(image_folder).as_posix()
+            for x in chain(image_folder.rglob("*.png"), image_folder.rglob("*.jpeg"))
+        ]
 
         for cur_frame in meta_file["data"]:
             for cur_camera_name, cur_c2w in cur_frame["worldTcam"].items():
@@ -428,29 +456,38 @@ def _read_slam_intrinsic_and_extrinsic(
 
 
 def readSlamSceneInfo(
-    json_path,
-    image_dir,
-    eval,
-    llffhold=8,
+        json_path: str | Path,
+        image_dir: str | Path,
+        eval_mode: bool = True,
+        llffhold=8,
+        load_pcd: bool = False,
+        force_centered_pp: bool = False,
 ) -> SceneInfo:
     assert Path(json_path).exists(), f"Path {json_path} does not exist."
 
     cam_intrinsics, cam_extrinsics = _read_slam_intrinsic_and_extrinsic(
         json_path=Path(json_path),
         image_folder=Path(image_dir),
-        output_convention="slam",
+        output_convention="opencv",
     )
-    cam_infos_unsorted = readColmapCameras(
+    cam_infos_unsorted: t.List[CameraInfo] = readColmapCameras(
         cam_extrinsics=cam_extrinsics,
         cam_intrinsics=cam_intrinsics,
         images_folder=image_dir,
+        force_centered_pp=force_centered_pp,
     )
-    cam_infos = sorted(cam_infos_unsorted.copy(), key=lambda x: x.image_name)
+    assert len(cam_infos_unsorted) > 0, "No valid camera found."
+    cam_infos: t.List[CameraInfo] = sorted(
+        cam_infos_unsorted.copy(), key=lambda x: x.image_name
+    )
 
     if os.environ.get("DEBUG", "0") == "1":
-        cam_infos = cam_infos[::2]
+        cam_infos = cam_infos[::4]
 
-    if eval:
+    train_cam_infos: t.List[CameraInfo]
+    test_cam_infos: t.List[CameraInfo]
+
+    if eval_mode:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
         test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
     else:
@@ -469,113 +506,6 @@ def readSlamSceneInfo(
         ply_path=None,
     )
     return scene_info
-
-
-def _readCamerasFromTransforms(
-    path, transformsfile, white_background, extension=".png"
-):
-    raise RuntimeError("this is not supported anymore.")
-    cam_infos = []
-
-    with open(os.path.join(path, transformsfile)) as json_file:
-        contents = json.load(json_file)
-        fovx = contents["camera_angle_x"]
-
-        frames = contents["frames"]
-        for idx, frame in enumerate(frames):
-            cam_name = os.path.join(path, frame["file_path"] + extension)
-
-            matrix = np.linalg.inv(np.array(frame["transform_matrix"]))
-            R = -np.transpose(matrix[:3, :3])
-            R[:, 0] = -R[:, 0]
-            T = -matrix[:3, 3]
-
-            image_path = os.path.join(path, cam_name)
-            image_name = Path(cam_name).stem
-            image = _read_image(image_path)
-
-            im_data = np.array(image.convert("RGBA"))
-
-            bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
-
-            norm_data = im_data / 255.0
-            arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + bg * (
-                1 - norm_data[:, :, 3:4]
-            )
-            image = Image.fromarray(np.array(arr * 255.0, dtype=np.byte), "RGB")
-
-            fovy = focal2fov(fov2focal(fovx, image.size[0]), image.size[1])
-            FovY = fovx
-            FovX = fovy
-
-            cam_infos.append(
-                CameraInfo(
-                    uid=idx,
-                    R=R,
-                    T=T,
-                    FovY=FovY,
-                    FovX=FovX,
-                    image=image,
-                    image_path=image_path,
-                    image_name=image_name,
-                    width=image.size[0],
-                    height=image.size[1],
-                )
-            )
-
-    return cam_infos
-
-
-def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
-    print("Reading Training Transforms")
-    train_cam_infos = _readCamerasFromTransforms(
-        path, "transforms_train.json", white_background, extension
-    )
-    print("Reading Test Transforms")
-    test_cam_infos = _readCamerasFromTransforms(
-        path, "transforms_test.json", white_background, extension
-    )
-
-    if not eval:
-        train_cam_infos.extend(test_cam_infos)
-        test_cam_infos = []
-
-    nerf_normalization = getNerfppNorm(train_cam_infos)
-
-    ply_path = os.path.join(path, "points3d.ply")
-    if not os.path.exists(ply_path):
-        # Since this data set has no colmap data, we start with random points
-        num_pts = 100_000
-        print(f"Generating random point cloud ({num_pts})...")
-
-        # We create random points inside the bounds of the synthetic Blender scenes
-        xyz = np.random.random((num_pts, 3)) * 2.6 - 1.3
-        shs = np.random.random((num_pts, 3)) / 255.0
-        pcd = BasicPointCloud(
-            points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3))
-        )
-
-        storePly(ply_path, xyz, SH2RGB(shs) * 255)
-    try:
-        pcd = fetchPly(ply_path)
-    except:
-        pcd = None
-
-    scene_info = SceneInfo(
-        point_cloud=pcd,
-        train_cameras=train_cam_infos,
-        test_cameras=test_cam_infos,
-        nerf_normalization=nerf_normalization,
-        ply_path=ply_path,
-    )
-    return scene_info
-
-
-sceneLoadTypeCallbacks = {
-    "Colmap": readColmapSceneInfo,
-    "Blender": readNerfSyntheticInfo,
-    "Slam": readSlamSceneInfo,
-}
 
 
 @lru_cache()

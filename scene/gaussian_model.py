@@ -8,15 +8,18 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+from __future__ import annotations
+
 import numpy as np
 import os
 import torch
 import typing as t
 from loguru import logger
 from plyfile import PlyData, PlyElement
-from simple_knn._C import distCUDA2
+from simple_knn._C import distCUDA2  # noqa
 from torch import nn, Tensor
 
+from gaussian_renderer.finetune_utils import rotation2quat
 from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 from utils.graphics_utils import BasicPointCloud
@@ -42,6 +45,19 @@ def setup_functions(self):
     self._rotation_activation = torch.nn.functional.normalize
 
 
+def merge_gaussian_models(*model: GaussianModel):
+    model = [x for x in model if x is not None]
+    new_model = GaussianModel(model[0].max_sh_degree)
+    new_model.active_sh_degree = model[0].active_sh_degree
+    new_model._xyz = torch.cat([m._xyz for m in model], dim=0)
+    new_model._features_dc = torch.cat([m._features_dc for m in model], dim=0)
+    new_model._features_rest = torch.cat([m._features_rest for m in model], dim=0)
+    new_model._scaling = torch.cat([m._scaling for m in model], dim=0)
+    new_model._rotation = torch.cat([m._rotation for m in model], dim=0)
+    new_model._opacity = torch.cat([m._opacity for m in model], dim=0)
+    return new_model
+
+
 class GaussianModel:
     _covariance_activation: t.Any
     _scaling_activation = torch.exp
@@ -64,7 +80,7 @@ class GaussianModel:
         self.max_radii2D = torch.empty(0)
         self.xyz_gradient_accum = torch.empty(0)
         self.denom = torch.empty(0)
-        self.optimizer = None
+        self.optimizer: torch.optim.Adam = None
         self.percent_dense = 0
         self.spatial_lr_scale = 0
         setup_functions(self)
@@ -146,8 +162,16 @@ class GaussianModel:
         return self.active_sh_degree == self.max_sh_degree
 
     def create_from_pcd(
-        self, pcd: BasicPointCloud, spatial_lr_scale: float, max_sphere: float = 1e-3
+        self,
+        pcd: BasicPointCloud,
+        spatial_lr_scale: float,
+        *,
+        max_sphere: float = 1e-3,
+        start_opacity: float = 0.1,
     ):
+        if spatial_lr_scale == 0.0:
+            spatial_lr_scale = 10.0
+            logger.warning("Spatial learning rate scale is zero, setting to 10.0")
         self.spatial_lr_scale = spatial_lr_scale
         fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
         fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
@@ -158,6 +182,31 @@ class GaussianModel:
         )
         features[:, :3, 0] = fused_color
         features[:, 3:, 1:] = 0.0
+        has_normal = False
+
+        if (
+            pcd.normals is not None
+            and len(np.array(pcd.normals)) > 0
+            and np.all(np.linalg.norm(np.array(pcd.normals), axis=-1) > 0.0)
+        ):
+            logger.warning(f"using normal")
+            # breakpoint()
+            # has_normal = True
+            normals = np.array(pcd.normals)
+            normals = normals + np.random.randn(*normals.shape) * 1e-6
+            normals /= np.linalg.norm(normals, axis=-1, keepdims=True)
+            v3 = torch.from_numpy(normals).float().cuda()
+            v2 = torch.cross(
+                v3, torch.tensor([0.0, 0.0, 1.0], device="cuda").repeat(v3.shape[0], 1)
+            )
+            v2 = v2 / torch.linalg.norm(v2, dim=-1, keepdim=True)  # Normalize v2
+            v1 = torch.cross(v2, v3)
+            v1 = v1 / torch.linalg.norm(v1, dim=-1, keepdim=True)  # Normalize v1
+            # compute the rotation matrix
+            rotation_matrix = torch.stack((v1, v2, v3), dim=1)
+
+            # from nerfstudio.data.utils.colmap_parsing_utils import rotmat2qvec
+            rots_normals = rotation2quat(rotation_matrix.transpose(-1, -2))
 
         print("Number of points at initialisation : ", fused_point_cloud.shape[0])
 
@@ -167,11 +216,17 @@ class GaussianModel:
         )
         dist2 = torch.clamp(dist2, 0.0000001, max_sphere)
         scales = torch.log(torch.sqrt(dist2 / 3))[..., None].repeat(1, 3)
+        if has_normal:
+            scales[:, 2] = torch.log(torch.exp(scales.max(dim=-1)[0]) / 3)
+            # pass
         rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
         rots[:, 0] = 1
 
+        if has_normal:
+            rots = rots_normals
+
         opacities = inverse_sigmoid(
-            0.99
+            start_opacity
             * torch.ones(
                 (fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"
             )
@@ -189,8 +244,11 @@ class GaussianModel:
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.xyz.shape[0]), device="cuda")
 
-    def training_setup(self, training_args):
-        self.percent_dense = training_args.percent_dense
+    def training_setup(self, training_args) -> torch.optim.Optimizer:
+        assert self.spatial_lr_scale > 0, self.spatial_lr_scale
+        self.percent_dense = training_args.percent_dense if hasattr(
+            training_args, "percent_dense"
+        ) else 0.01
         self.xyz_gradient_accum = torch.zeros((self.xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.xyz.shape[0], 1), device="cuda")
 
@@ -207,7 +265,7 @@ class GaussianModel:
             },
             {
                 "params": [self._features_rest],
-                "lr": training_args.feature_lr / 20.0,
+                "lr": training_args.feature_lr / 20,
                 "name": "f_rest",
             },
             {
@@ -234,6 +292,19 @@ class GaussianModel:
             lr_delay_mult=training_args.position_lr_delay_mult,
             max_steps=training_args.position_lr_max_steps,
         )
+        self._other_scheduler_args = {}  # noqa
+        for cur_group in l:
+            if cur_group["name"] == "xyz":
+                self._other_scheduler_args[cur_group["name"]] = self.xyz_scheduler_args
+            elif cur_group["name"] not in ["opacity", "f_dc", "f_rest"]:
+                self._other_scheduler_args[cur_group["name"]] = get_expon_lr_func(
+                    lr_init=cur_group["lr"],
+                    lr_final=cur_group["lr"] / 2,
+                    lr_delay_mult=training_args.position_lr_delay_mult,
+                    max_steps=training_args.position_lr_max_steps,
+                )
+
+        return self.optimizer
 
     def update_learning_rate(self, iteration):
         """Learning rate scheduling per step"""
@@ -241,7 +312,12 @@ class GaussianModel:
             if param_group["name"] == "xyz":
                 lr = self.xyz_scheduler_args(iteration)
                 param_group["lr"] = lr
-                return lr
+            else:
+                try:
+                    lr = self._other_scheduler_args[param_group["name"]](iteration)
+                    param_group["lr"] = lr
+                except KeyError:
+                    continue
 
     def construct_list_of_attributes(self):
         l = ["x", "y", "z", "nx", "ny", "nz"]

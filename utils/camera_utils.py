@@ -8,61 +8,28 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-from multiprocessing.dummy import Pool
 
-import os
 import typing as t
 
+import torch
+from tqdm import tqdm
+
 from scene.cameras import Camera
-from scene.dataset_readers import _read_image, CameraInfo
-from utils.general_utils import PILtoTorch
+from scene.dataset_readers import CameraInfo
 from utils.graphics_utils import fov2focal
 
-WARNED = False
 
+def loadCam(downsample: int, id: int, cam_info: CameraInfo, resolution_scale) -> Camera:
+    (cx, cy) = (cam_info.cx / downsample, cam_info.cy / downsample)
+    focal_length_x, focal_length_y = (
+        cam_info.focal_x / downsample,
+        cam_info.focal_y / downsample,
+    )
+    image_width = int(cam_info.width / downsample)
+    image_height = int(cam_info.height / downsample)
 
-def loadCam(args, id: int, cam_info: CameraInfo, resolution_scale) -> Camera:
-    if cam_info.image is None:
-        cam_info.image = _read_image(cam_info.image_path)
-
-    orig_w, orig_h = cam_info.image.size
-
-    if args.resolution in [1, 2, 4, 8]:
-        scale = args.resolution
-        resolution = round(orig_w / (resolution_scale * args.resolution)), round(
-            orig_h / (resolution_scale * args.resolution)
-        )
-    else:  # should be a type that converts to float
-        if args.resolution == -1:
-            if orig_w > 1600:
-                global WARNED
-                if not WARNED:
-                    print(
-                        "[ INFO ] Encountered quite large input images (>1.6K pixels width), rescaling to 1.6K.\n "
-                        "If this is not desired, please explicitly specify '--resolution/-r' as 1"
-                    )
-                    WARNED = True
-                global_down = orig_w / 1600
-            else:
-                global_down = 1
-        else:
-            global_down = orig_w / args.resolution
-
-        scale = float(global_down) * float(resolution_scale)
-        resolution = (int(orig_w / scale), int(orig_h / scale))
-
-    (cx, cy) = (cam_info.cx / scale, cam_info.cy / scale)
-    focal_length_x, focal_length_y = cam_info.focal_x / scale, cam_info.focal_y / scale
-
-    resized_image_rgb = PILtoTorch(cam_info.image, resolution)
-
-    gt_image = resized_image_rgb[:3, ...]
     loaded_mask = None
-
-    if resized_image_rgb.shape[1] == 4:
-        loaded_mask = resized_image_rgb[3:4, ...]
-
-    return Camera(
+    camera = Camera(
         colmap_id=cam_info.uid,
         R=cam_info.R,
         T=cam_info.T,
@@ -70,24 +37,30 @@ def loadCam(args, id: int, cam_info: CameraInfo, resolution_scale) -> Camera:
         FoVy=cam_info.FovY,
         cx=cx,
         cy=cy,
-        image=gt_image,
+        image=cam_info.image_path,
         gt_alpha_mask=loaded_mask,
         image_name=cam_info.image_name,
         uid=id,
-        data_device=args.data_device,
+        data_device="cuda",
         focal_x=focal_length_x,
         focal_y=focal_length_y,
+        image_width=image_width,
+        image_height=image_height,
     )
+    return camera
 
 
-def cameraList_from_camInfos(cam_infos, resolution_scale, args) -> t.List[Camera]:
-    # camera_list = []
-    with Pool(os.cpu_count() * 2) as pool:
-        camera_list = pool.starmap(
-            loadCam, [(args, x, y, resolution_scale) for x, y in enumerate(cam_infos)]
-        )
-    # for id, c in enumerate(cam_infos):
-    #     camera_list.append(loadCam(args, id, c, resolution_scale))
+def cameraList_from_camInfos(cam_infos, resolution_scale, downscale) -> t.List[Camera]:
+    # with Pool(os.cpu_count() * 2) as pool:
+    #     camera_list = pool.starmap(
+    #         loadCam,
+    #         [(downscale, x, y, resolution_scale) for x, y in enumerate(cam_infos)],
+    #     )
+
+    camera_list = []
+
+    for num, camera_info in tqdm(enumerate(cam_infos), total=len(cam_infos)):
+        camera_list.append(loadCam(downscale, num, camera_info, resolution_scale))
 
     return camera_list
 
@@ -120,3 +93,48 @@ def camera_to_JSON(id, camera: CameraInfo):
         "cy": camera.cy,
     }
     return camera_entry
+
+
+import math
+
+
+def euler_from_quaternion(x, y, z, w):
+    """
+    Convert a quaternion into euler angles (roll, pitch, yaw)
+    roll is rotation around x in radians (counterclockwise)
+    pitch is rotation around y in radians (counterclockwise)
+    yaw is rotation around z in radians (counterclockwise)
+    """
+    t0 = +2.0 * (w * x + y * z)
+    t1 = +1.0 - 2.0 * (x * x + y * y)
+    roll_x = math.atan2(t0, t1)
+
+    t2 = +2.0 * (w * y - z * x)
+    t2 = +1.0 if t2 > +1.0 else t2
+    t2 = -1.0 if t2 < -1.0 else t2
+    pitch_y = math.asin(t2)
+
+    t3 = +2.0 * (w * z + x * y)
+    t4 = +1.0 - 2.0 * (y * y + z * z)
+    yaw_z = math.atan2(t3, t4)
+
+    return roll_x, pitch_y, yaw_z  # in radians
+
+
+def camera_metrics(cameras: t.List[Camera]):
+    translation = torch.cat([x.delta_t for x in cameras])
+    rotation = torch.cat([x.delta_quat for x in cameras])
+
+    transalation_max = translation.norm(dim=-1).max()
+    transalation_mean = translation.norm(dim=-1).mean()
+
+    degrees = [euler_from_quaternion(*x[[1, 2, 3, 0]]) for x in rotation]
+    degrees_mean = torch.tensor(degrees).mean()
+    degrees_max = torch.tensor(degrees).max()
+
+    return {
+        "translation_max": float(transalation_max),
+        "translation_mean": float(transalation_mean),
+        "rotation_mean": float(degrees_mean),
+        "rotation_max": float(degrees_max),
+    }

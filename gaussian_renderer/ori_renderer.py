@@ -21,7 +21,7 @@ from diff_gaussian_rasterization_ori import (
 from utils.sh_utils import eval_sh
 
 if t.TYPE_CHECKING:
-    from scene import Camera
+    from scene.cameras import Camera
     from scene.gaussian_model import GaussianModel
 
 

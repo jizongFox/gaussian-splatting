@@ -8,12 +8,13 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-
 import numpy as np
 import random
 import sys
 import torch
+from PIL import Image
 from datetime import datetime
+from pathlib import Path
 
 
 def inverse_sigmoid(x):
@@ -155,3 +156,13 @@ def safe_state(silent):
     np.random.seed(0)
     torch.manual_seed(0)
     torch.cuda.set_device(torch.device("cuda:0"))
+
+
+def run_resize(image_path: str | Path, width: int, height: int):
+    with Image.open(image_path) as image:
+        image = image.convert("RGB")
+
+    resized_image_rgb = PILtoTorch(image, (width, height))
+
+    gt_image = resized_image_rgb[:3, ...]
+    return gt_image
