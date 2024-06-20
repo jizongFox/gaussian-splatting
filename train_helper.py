@@ -10,16 +10,15 @@
 #
 from __future__ import annotations
 
-import typing as t
-from functools import partial
-from itertools import chain
-from pathlib import Path
-
 import open3d as o3d
 import rich
 import torch
+import typing as t
 import yaml
+from functools import partial
+from itertools import chain
 from loguru import logger
+from pathlib import Path
 from torch import Tensor, nn
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -30,6 +29,7 @@ from configs.base import (
 )
 from gaussian_renderer import pose_depth_render_unified
 from scene.cameras import Camera
+from scene.cameras_rig import to_camera_rig, create_pose_optimizer, CameraRig
 from scene.creator import Scene, GaussianModel
 from scene.dataset_readers import fetchPly
 from scene.gaussian_model import merge_gaussian_models
@@ -103,7 +103,7 @@ def training(
         gaussians: GaussianModel,
         bkg_gaussian: GaussianModel | None = None,
         scene: Scene,
-        tra_cameras: t.List[Camera],
+        tra_cameras: t.List[Camera | CameraRig],
         test_cameras: t.List[Camera],
         writer: SummaryWriter,
         optimizers: t.List[t.Union[torch.optim.Optimizer, None]],
@@ -177,7 +177,11 @@ def training(
             exposure_manager.record_exps(writer, iteration=iteration)
 
         if iteration % 10 == 0:
-            camera_opt = camera_metrics(tra_cameras)
+            if config.control.rig_optimization:
+                from scene.cameras_rig import camera_metrics as rig_camera_metrics
+                camera_opt = rig_camera_metrics(tra_cameras)
+            else:
+                camera_opt = camera_metrics(tra_cameras)
             for key, value in camera_opt.items():
                 writer.add_scalar(f"train/opt_{key}", value, iteration)
 
@@ -296,12 +300,21 @@ def main(
         f"Loaded {len(gaussians)} points from {config.dataset.pcd_path}, opacity: {config.dataset.pcd_start_opacity}"
     )
 
-    optimizer = gaussians.training_setup(config.optimizer)
+    tra_cameras = scene.getTrainCameras()
+    eval_cameras = scene.getTestCameras()
 
+    optimizer = gaussians.training_setup(config.optimizer)
     pose_optimizer = scene.pose_optimizer(lr=config.control.pose_lr_init)
-    k = config.iterations / 10
-    gamma = (1 / 2) ** (1 / k)
-    pose_scheduler = torch.optim.lr_scheduler.ExponentialLR(pose_optimizer, gamma=gamma)
+
+    if config.control.rig_optimization:
+        # override the pose optimizer
+        logger.info("Using camera rig optimization")
+        tra_cameras = to_camera_rig(tra_cameras)
+        pose_optimizer = create_pose_optimizer(tra_cameras, lr=config.control.pose_lr_init)
+
+    pose_scheduler = torch.optim.lr_scheduler.ExponentialLR(
+        pose_optimizer, gamma=(1 / 2) ** (1 / config.iterations / 10)
+    )
 
     bg_color = [1, 1, 1] if config.model.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
@@ -370,8 +383,8 @@ def main(
         bkg_gaussian=bkg_gaussians,
         scene=scene,
         background=background,
-        tra_cameras=scene.getTrainCameras(),
-        test_cameras=scene.getTestCameras(),
+        tra_cameras=tra_cameras,
+        test_cameras=eval_cameras,
         writer=tb_writer,
         optimizers=[pose_optimizer, optimizer, bkg_optimizer, exposure_optimizer],
         exposure_manager=exposure_manager,

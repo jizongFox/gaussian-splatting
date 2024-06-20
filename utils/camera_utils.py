@@ -9,9 +9,8 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-import typing as t
-
 import torch
+import typing as t
 from tqdm import tqdm
 
 from scene.cameras import Camera
@@ -46,6 +45,7 @@ def loadCam(downsample: int, id: int, cam_info: CameraInfo, resolution_scale) ->
         focal_y=focal_length_y,
         image_width=image_width,
         image_height=image_height,
+        camera_extrinsic=cam_info.camera_extrinsic,
     )
     return camera
 

@@ -128,6 +128,8 @@ class ControlConfig(_BaseConfig):
     include_0_epoch: bool = False
     test_iterations: List[int] = field(init=False, default_factory=lambda: [])
 
+    rig_optimization: bool = False
+
 
 if not TYPE_CHECKING:
     DATACONFIG = tyro.extras.subcommand_type_from_defaults(
@@ -198,6 +200,5 @@ class ExperimentConfig(_BaseConfig):
 
 
 if __name__ == "__main__":
-
     exp_config = tyro.cli(ExperimentConfig)
     print(exp_config)

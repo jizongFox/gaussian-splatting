@@ -8,6 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+
 import numpy as np
 import torch
 import typing as t
@@ -34,8 +35,8 @@ class Camera(nn.Module):
     def __init__(
         self,
         colmap_id: int,
-        R: Float[np.ndarray, "3 3"],
-        T: Float[np.ndarray, "3"],
+            R: Float[np.ndarray, "3 3"] | Float[Tensor, "3 3"],
+            T: Float[np.ndarray, "3"] | Float[Tensor, "3 3"],
         FoVx: float,
         FoVy: float,
         focal_x: float,
@@ -51,6 +52,7 @@ class Camera(nn.Module):
         data_device: str = "cuda",
         image_width: int = None,
         image_height: int = None,
+            camera_extrinsic: Float[Tensor, "6"] | None = None,
     ):
         """
         Camera class for storing camera information and image data.
@@ -76,8 +78,8 @@ class Camera(nn.Module):
 
         self.uid = uid
         self.colmap_id = colmap_id
-        self.R = R.astype(np.float32)
-        self.T = T.astype(np.float32)
+        self.R = R
+        self.T = T
         self.FoVx = FoVx
         self.FoVy = FoVy
         self.cx: float = cx
@@ -107,18 +109,18 @@ class Camera(nn.Module):
         self.delta_t: Float[Tensor, "1 3"] = nn.Parameter(
             torch.zeros(1, 3, device=data_device),
             requires_grad=False,
-        )
-        #
-        # to ndc matrix?
-        # todo: this is to change where we take consideration of cx and cy
+        )  # # to ndc matrix?  # todo: this is to change where we take consideration of cx and cy
 
         # self.world2cam = torch.tensor(getWorld2View2(R, T, trans, scale))
+
+        self.camera_extrinsic = camera_extrinsic
 
     def extra_repr(self) -> str:
         return (
             f"name={self.image_name}, image_id={self.uid}, "
             f"c2w={self.cam2world.detach().cpu().numpy().tolist()}, "
-            f"center={self.camera_center}"
+            f"center={self.camera_center}, "
+            f"camera_extrinsic={self.camera_extrinsic.tolist()}"
         )
 
     @property
@@ -143,9 +145,7 @@ class Camera(nn.Module):
     def world_view_transform(self) -> Float[Tensor, "4 4"]:
         # todo  world_view_transform records the w2c matrix with transpose (w2c^{T}).
 
-        R_new = quat2rotation(self.delta_quat)[0] @ torch.tensor(
-            self.R, device=self.data_device
-        )
+        R_new = quat2rotation(self.delta_quat)[0] @ self.R
 
         t_new = (
             quat2rotation(self.delta_quat)[0] @ self.cam2world_ori[:3, 3] + self.delta_t
@@ -161,10 +161,8 @@ class Camera(nn.Module):
     def world_view_transform_old_method(self) -> Float[Tensor, "4 4"]:
         # todo  world_view_transform records the w2c matrix with transpose (w2c^{T}).
 
-        R_new = quat2rotation(self.delta_quat)[0] @ torch.tensor(
-            self.R, device=self.data_device
-        )
-        T_new = torch.tensor(self.T, device=self.data_device) + self.delta_t
+        R_new = quat2rotation(self.delta_quat)[0] @ self.R
+        T_new = self.T + self.delta_t
 
         # R_new is the c2w matrix with delta rotation.
         # T_new is the w2c matrix with delta translation.
@@ -176,6 +174,10 @@ class Camera(nn.Module):
         return torch.inverse(self.world_view_transform.transpose(0, 1))
 
     @property
+    def world2cam(self) -> Float[Tensor, "4 4"]:
+        return self.world_view_transform.transpose(0, 1)
+
+    @property
     def camera_center(self):
         return self.cam2world[:3, 3].cuda()
 
@@ -185,8 +187,8 @@ class Camera(nn.Module):
 
     @property
     def world_view_transform_ori(self) -> Float[Tensor, "4 4"]:
-        R = torch.tensor(self.R, device=self.data_device)
-        T = torch.tensor(self.T, device=self.data_device)
+        R = self.R
+        T = self.T
         return getWorld2View_torch(R, T).transpose(0, 1)
 
     @property
@@ -210,13 +212,40 @@ class Camera(nn.Module):
                 image_path=self.image, width=self.image_width, height=self.image_height
             )
         except AttributeError as e:
-            raise RuntimeError(e)
-        # if isinstance(self.image, (str, Path)):
+            raise RuntimeError(e)  # if isinstance(self.image, (str, Path)):
 
-        # return run_resize(
-        #     image_path=self.image, width=self.image_width, height=self.image_height
-        # )
-        # elif isinstance(self.image, Tensor):
-        #     return self.image
-        # else:
-        #     raise ValueError("Image type not supported")
+        # return run_resize(  #     image_path=self.image, width=self.image_width, height=self.image_height  # )  # elif isinstance(self.image, Tensor):  #     return self.image  # else:  #     raise ValueError("Image type not supported")
+
+    @property
+    def camera_name(self) -> str:
+        return str(Path(self.image_name).parents[0])
+
+    @property
+    def time_slot(self) -> str:
+        return str(Path(self.image_name).stem)
+
+    @property
+    def R(self) -> torch.Tensor:
+        return self._R
+
+    @R.setter
+    def R(self, value):
+        if isinstance(value, np.ndarray):
+            self._R = torch.from_numpy(value).float().cuda()
+        elif isinstance(value, Tensor):
+            self._R = value
+        else:
+            raise NotImplementedError("R should be either np.ndarray or torch.Tensor")
+
+    @property
+    def T(self) -> torch.Tensor:
+        return self._T
+
+    @T.setter
+    def T(self, value):
+        if isinstance(value, np.ndarray):
+            self._T = torch.from_numpy(value).float().cuda()
+        elif isinstance(value, Tensor):
+            self._T = value
+        else:
+            raise NotImplementedError("T should be either np.ndarray or torch.Tensor")
