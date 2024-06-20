@@ -126,6 +126,7 @@ def training(
         viewpoint_cam = cur_camera["camera"]
         gt_image = cur_camera["target"]
         mask = cur_camera["mask"]
+        background = torch.rand(3, device="cuda", dtype=torch.float32)
 
         render_pkg, *_ = pose_depth_render_unified(
             viewpoint_cam,
@@ -298,14 +299,13 @@ def main(
     optimizer = gaussians.training_setup(config.optimizer)
 
     pose_optimizer = scene.pose_optimizer(lr=config.control.pose_lr_init)
-    k = config.iterations / 5
+    k = config.iterations / 10
     gamma = (1 / 2) ** (1 / k)
-    pose_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma)
+    pose_scheduler = torch.optim.lr_scheduler.ExponentialLR(pose_optimizer, gamma=gamma)
 
     bg_color = [1, 1, 1] if config.model.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
     # using random background
-    background = torch.rand(3, device="cuda", dtype=torch.float32)
 
     tb_writer = prepare_output_and_logger(config)
     if use_bkg_model:
