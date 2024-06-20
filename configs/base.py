@@ -198,6 +198,9 @@ class ExperimentConfig(_BaseConfig):
             if 1 not in self.control.test_iterations:
                 self.control.test_iterations.append(1)
 
+        if self.control.rig_optimization:
+            assert isinstance(self.dataset, SlamDatasetConfig), "rig optimization is only supported for slam dataset."
+
 
 if __name__ == "__main__":
     exp_config = tyro.cli(ExperimentConfig)
