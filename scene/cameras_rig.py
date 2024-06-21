@@ -43,29 +43,31 @@ def delta_parameter_to_matrix(delta: Float[Tensor, "6"]) -> Float[Tensor, "4 4"]
 
 class CameraRig(nn.Module):
     def __init__(
-            self,
-            *,
-            colmap_id: int,
-            camera2center: Float[Tensor, "4 4"],
-            center2world: Float[Tensor, "4 4"],
-            camera2center_delta: Float[Tensor, "6"] | None = None,
-            center2world_delta: Float[Tensor, "6"] | None = None,
-            FoVx: float,
-            FoVy: float,
-            focal_x: float,
-            focal_y: float,
-            cx: float,
-            cy: float,
-            image: Float[Tensor, "3 h w"] | str | Path,
-            gt_alpha_mask: t.Optional[Float[Tensor, "h w"]],
-            image_name: str,
-            uid: int,
-            trans: Float[np.ndarray, "3 "] = np.array([0.0, 0.0, 0.0]),
-            scale: float = 1.0,
-            data_device: str = "cuda",
-            image_width: int = None,
-            image_height: int = None,
-            camera_extrinsic: Float[Tensor, "6"] | None = None,
+        self,
+        *,
+        colmap_id: int,
+        camera2center: Float[Tensor, "4 4"],
+        center2world: Float[Tensor, "4 4"],
+        camera2center_delta_quat: Float[Tensor, "6"] | None = None,
+        camera2center_delta_trans: Float[Tensor, "6"] | None = None,
+        center2world_delta_quat: Float[Tensor, "6"] | None = None,
+        center2world_delta_trans: Float[Tensor, "6"] | None = None,
+        FoVx: float,
+        FoVy: float,
+        focal_x: float,
+        focal_y: float,
+        cx: float,
+        cy: float,
+        image: Float[Tensor, "3 h w"] | str | Path,
+        gt_alpha_mask: t.Optional[Float[Tensor, "h w"]],
+        image_name: str,
+        uid: int,
+        trans: Float[np.ndarray, "3 "] = np.array([0.0, 0.0, 0.0]),
+        scale: float = 1.0,
+        data_device: str = "cuda",
+        image_width: int = None,
+        image_height: int = None,
+        camera_extrinsic: Float[Tensor, "6"] | None = None,
     ):
         """
         Camera class for storing camera information and image data.
@@ -90,8 +92,10 @@ class CameraRig(nn.Module):
         super().__init__()
         self.cam2center = camera2center
         self.center2world = center2world
-        self.cam2center_delta = camera2center_delta
-        self.center2world_delta = center2world_delta
+        self.cam2center_delta_quat = camera2center_delta_quat
+        self.cam2center_delta_trans = camera2center_delta_trans
+        self.center2world_delta_quat = center2world_delta_quat
+        self.center2world_delta_trans = center2world_delta_trans
 
         self.uid = uid
         self.colmap_id = colmap_id
@@ -214,8 +218,6 @@ class CameraRig(nn.Module):
         except AttributeError as e:
             raise RuntimeError(e)  # if isinstance(self.image, (str, Path)):
 
-        # return run_resize(  #     image_path=self.image, width=self.image_width, height=self.image_height  # )  # elif isinstance(self.image, Tensor):  #     return self.image  # else:  #     raise ValueError("Image type not supported")
-
     @property
     def camera_name(self) -> str:
         return str(Path(self.image_name).parents[0])
@@ -228,10 +230,10 @@ class CameraRig(nn.Module):
     def R(self) -> torch.Tensor:
         if self.cam2center_delta is not None:
             cam2world = (
-                    delta_parameter_to_matrix(self.center2world_delta)
-                    @ self.center2world
-                    @ delta_parameter_to_matrix(self.cam2center_delta)
-                    @ self.cam2center
+                delta_parameter_to_matrix(self.center2world_delta)
+                @ self.center2world
+                @ delta_parameter_to_matrix(self.cam2center_delta)
+                @ self.cam2center
             )
         else:
             cam2world = self.center2world @ self.cam2center
@@ -241,17 +243,25 @@ class CameraRig(nn.Module):
     def T(self) -> torch.Tensor:
         if self.cam2center_delta is not None:
             cam2world = (
-                    delta_parameter_to_matrix(self.center2world_delta)
-                    @ self.center2world
-                    @ delta_parameter_to_matrix(self.cam2center_delta)
-                    @ self.cam2center
+                delta_parameter_to_matrix(self.center2world_delta)
+                @ self.center2world
+                @ delta_parameter_to_matrix(self.cam2center_delta)
+                @ self.cam2center
             )
         else:
             cam2world = self.center2world @ self.cam2center
         return torch.inverse(cam2world)[:3, 3]
 
+    @property
+    def center2world_delta(self) -> Float[Tensor, "6"]:
+        return torch.cat([self.center2world_delta_trans, self.center2world_delta_quat])
 
-def to_camera_rig(cameras: t.List[Camera]) -> t.List[CameraRig]:
+    @property
+    def cam2center_delta(self) -> Float[Tensor, "6"]:
+        return torch.cat([self.cam2center_delta_trans, self.cam2center_delta_quat])
+
+
+def to_rig_cameras(cameras: t.List[Camera]) -> t.List[CameraRig]:
     def create_cam2center(extrinsic: Float[np.ndarray, "6"]):
         cam_rot = quat2rotation(
             torch.from_numpy(extrinsic[:4].astype(np.float32))[None, ...]
@@ -283,12 +293,20 @@ def to_camera_rig(cameras: t.List[Camera]) -> t.List[CameraRig]:
         for c in cameras
     }
 
-    center_to_worlds_delta = {
-        k: nn.Parameter(torch.zeros(6, device="cuda"), requires_grad=True)
+    center_to_worlds_delta_quat = {
+        k: nn.Parameter(torch.zeros(3, device="cuda"), requires_grad=True)
         for k in center_to_worlds
     }
-    camera_to_center_delta = {
-        k: nn.Parameter(torch.zeros(6, device="cuda"), requires_grad=True)
+    center_to_worlds_delta_trans = {
+        k: nn.Parameter(torch.zeros(3, device="cuda"), requires_grad=True)
+        for k in center_to_worlds
+    }
+    camera_to_center_delta_quat = {
+        k: nn.Parameter(torch.zeros(3, device="cuda"), requires_grad=True)
+        for k in camera_to_center
+    }
+    camera_to_center_delta_trans = {
+        k: nn.Parameter(torch.zeros(3, device="cuda"), requires_grad=True)
         for k in camera_to_center
     }
 
@@ -302,8 +320,14 @@ def to_camera_rig(cameras: t.List[Camera]) -> t.List[CameraRig]:
             colmap_id=cur_camera.colmap_id,
             camera2center=camera_to_center[cur_camera.camera_name],
             center2world=center_to_worlds[cur_camera.time_slot],
-            camera2center_delta=camera_to_center_delta[cur_camera.camera_name],
-            center2world_delta=center_to_worlds_delta[cur_camera.time_slot],
+            camera2center_delta_quat=camera_to_center_delta_quat[
+                cur_camera.camera_name
+            ],
+            camera2center_delta_trans=camera_to_center_delta_trans[
+                cur_camera.camera_name
+            ],
+            center2world_delta_quat=center_to_worlds_delta_quat[cur_camera.time_slot],
+            center2world_delta_trans=center_to_worlds_delta_trans[cur_camera.time_slot],
             FoVx=cur_camera.FoVx,
             FoVy=cur_camera.FoVy,
             focal_x=cur_camera.focal_x,
@@ -322,13 +346,19 @@ def to_camera_rig(cameras: t.List[Camera]) -> t.List[CameraRig]:
     return rig_cameras
 
 
-def create_pose_optimizer(camera_rig: t.List[CameraRig], lr, scene_scale: float = 20) -> torch.optim.Adam:
-    cam2center_parameters = []
-    center2world_parameters = []
+def create_pose_optimizer(
+    camera_rig: t.List[CameraRig], lr, scene_scale: float = 20
+) -> torch.optim.Adam:
+    cam2center_quat_parameters = []
+    cam2center_trans_parameters = []
+    center2world_quat_parameters = []
+    center2world_trans_parameters = []
 
     for cur_camera in camera_rig:
-        cam2center_parameters.append(cur_camera.cam2center_delta)
-        center2world_parameters.append(cur_camera.center2world_delta)
+        cam2center_quat_parameters.append(cur_camera.cam2center_delta_quat)
+        cam2center_trans_parameters.append(cur_camera.cam2center_delta_trans)
+        center2world_quat_parameters.append(cur_camera.center2world_delta_quat)
+        center2world_trans_parameters.append(cur_camera.center2world_delta_trans)
     """
     exmaple 
      [
@@ -366,8 +396,18 @@ def create_pose_optimizer(camera_rig: t.List[CameraRig], lr, scene_scale: float 
     """
 
     params = [
-        {"params": cam2center_parameters, "lr": lr, "name": "cam2center"},
-        {"params": center2world_parameters, "lr": lr * scene_scale, "name": "center2world"},
+        {"params": cam2center_quat_parameters, "lr": lr, "name": "cam2center_quat"},
+        {
+            "params": cam2center_trans_parameters,
+            "lr": lr * scene_scale,
+            "name": "cam2center_trans",
+        },
+        {"params": center2world_quat_parameters, "lr": lr, "name": "center2world_quat"},
+        {
+            "params": center2world_trans_parameters,
+            "lr": lr * scene_scale,
+            "name": "center2world_trans",
+        },
     ]
     pose_optimizer = torch.optim.Adam(params, lr=lr)
     return pose_optimizer

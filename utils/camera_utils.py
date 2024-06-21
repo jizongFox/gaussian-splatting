@@ -8,7 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-
+import numpy as np
 import torch
 import typing as t
 from tqdm import tqdm
@@ -128,13 +128,12 @@ def camera_metrics(cameras: t.List[Camera]):
     transalation_max = translation.norm(dim=-1).max()
     transalation_mean = translation.norm(dim=-1).mean()
 
-    degrees = [euler_from_quaternion(*x[[1, 2, 3, 0]]) for x in rotation]
-    degrees_mean = torch.tensor(degrees).mean()
-    degrees_max = torch.tensor(degrees).max()
+    rotation_mean = np.rad2deg(rotation.mean().cpu().detach())
+    rotation_max = np.rad2deg(rotation.max().cpu().detach())
 
     return {
         "translation_max": float(transalation_max),
         "translation_mean": float(transalation_mean),
-        "rotation_mean": float(degrees_mean),
-        "rotation_max": float(degrees_max),
+        "rotation_mean": float(rotation_mean),
+        "rotation_max": float(rotation_max),
     }
