@@ -151,11 +151,11 @@ def training(
         image = image * mask
 
         yiq_loss = yiq_color_space_loss(
-            image[None, ...], gt_image[None, ...], channel_weight=(0.6, 1, 1)
+            image[None, ...], gt_image[None, ...], channel_weight=(0.4, 1, 1)
         )
         rgb_loss = nn.L1Loss()(image, gt_image)
         Ll1 = (1.0 - config.optimizer.lambda_dssim) * (
-                yiq_loss + rgb_loss) / 2 + config.optimizer.lambda_dssim * ssim_loss
+                yiq_loss + yiq_loss) / 2 + config.optimizer.lambda_dssim * ssim_loss
 
         # perceptual_loss = vgg_loss(image[None, ...], gt_image[None, ...])
 
@@ -183,7 +183,7 @@ def training(
             else:
                 camera_opt = camera_metrics(tra_cameras)
             for key, value in camera_opt.items():
-                writer.add_scalar(f"train/opt_{key}", value, iteration)
+                writer.add_scalar(f"pose_optimizer/{key}", value, iteration)
 
         for cur_loss_cb in loss_cbs:
             if cur_loss_cb is None:
@@ -310,10 +310,11 @@ def main(
         # override the pose optimizer
         logger.info("Using camera rig optimization")
         tra_cameras = to_camera_rig(tra_cameras)
-        pose_optimizer = create_pose_optimizer(tra_cameras, lr=config.control.pose_lr_init)
+        pose_optimizer = create_pose_optimizer(tra_cameras, lr=config.control.pose_lr_init,
+                                               scene_scale=scene.cameras_extent)
 
     pose_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-        pose_optimizer, gamma=(1 / 2) ** (1 / config.iterations / 10)
+        pose_optimizer, gamma=(1 / 2) ** (1 / (config.iterations / 10))
     )
 
     bg_color = [1, 1, 1] if config.model.white_background else [0, 0, 0]

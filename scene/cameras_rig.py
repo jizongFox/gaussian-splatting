@@ -322,13 +322,54 @@ def to_camera_rig(cameras: t.List[Camera]) -> t.List[CameraRig]:
     return rig_cameras
 
 
-def create_pose_optimizer(camera_rig: t.List[CameraRig], lr) -> torch.optim.Adam:
-    parameters = []
+def create_pose_optimizer(camera_rig: t.List[CameraRig], lr, scene_scale: float = 20) -> torch.optim.Adam:
+    cam2center_parameters = []
+    center2world_parameters = []
 
     for cur_camera in camera_rig:
-        parameters.append(cur_camera.cam2center_delta)
-        parameters.append(cur_camera.center2world_delta)
-    pose_optimizer = torch.optim.Adam(parameters, lr=lr)
+        cam2center_parameters.append(cur_camera.cam2center_delta)
+        center2world_parameters.append(cur_camera.center2world_delta)
+    """
+    exmaple 
+     [
+            {
+                "params": [self._xyz],
+                "lr": training_args.position_lr_init * self.spatial_lr_scale,
+                "name": "xyz",
+            },
+            {
+                "params": [self._features_dc],
+                "lr": training_args.feature_lr,
+                "name": "f_dc",
+            },
+            {
+                "params": [self._features_rest],
+                "lr": training_args.feature_lr / 20,
+                "name": "f_rest",
+            },
+            {
+                "params": [self._opacity],
+                "lr": training_args.opacity_lr,
+                "name": "opacity",
+            },
+            {
+                "params": [self._scaling],
+                "lr": training_args.scaling_lr,
+                "name": "scaling",
+            },
+            {
+                "params": [self._rotation],
+                "lr": training_args.rotation_lr,
+                "name": "rotation",
+            },
+        ]
+    """
+
+    params = [
+        {"params": cam2center_parameters, "lr": lr, "name": "cam2center"},
+        {"params": center2world_parameters, "lr": lr * scene_scale, "name": "center2world"},
+    ]
+    pose_optimizer = torch.optim.Adam(params, lr=lr)
     return pose_optimizer
 
 

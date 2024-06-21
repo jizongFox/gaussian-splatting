@@ -120,7 +120,7 @@ class Camera(nn.Module):
             f"name={self.image_name}, image_id={self.uid}, "
             f"c2w={self.cam2world.detach().cpu().numpy().tolist()}, "
             f"center={self.camera_center}, "
-            f"camera_extrinsic={self.camera_extrinsic.tolist()}"
+            # f"camera_extrinsic={self.camera_extrinsic.tolist()}"
         )
 
     @property
