@@ -15,10 +15,11 @@ import rich
 import torch
 import typing as t
 import yaml
+from functools import partial
 from itertools import chain
 from loguru import logger
 from pathlib import Path
-from torch import Tensor
+from torch import Tensor, nn
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -27,21 +28,31 @@ from configs.base import (
     OptimizerConfig,
 )
 from gaussian_renderer import pose_depth_render_unified
-from scene.cameras import Camera
+from scene.cameras import Camera, create_pose_optimizer
+from scene.cameras_rig import (
+    to_rig_cameras,
+    create_pose_optimizer as create_pose_optimizer_rig,
+    CameraRig,
+)
 from scene.creator import Scene, GaussianModel
 from scene.dataset_readers import fetchPly
 from scene.gaussian_model import merge_gaussian_models
 from utils.background_helper import BackgroundPCDCreator
+from utils.camera_utils import camera_metrics
+from utils.exposure_utils import ExposureManager, ExposureGrid
 from utils.loss_utils import (
     ssim,
     yiq_color_space_loss,
 )
+from utils.perceptual_loss import VGGLoss
 from utils.system_utils import get_hash
 from utils.train_utils import (
     prepare_output_and_logger,
     iterate_over_cameras,
     report_status,
 )
+
+vgg_loss = VGGLoss().cuda()
 
 
 def densification(
@@ -96,12 +107,14 @@ def training(
     gaussians: GaussianModel,
     bkg_gaussian: GaussianModel | None = None,
     scene: Scene,
-    tra_cameras: t.List[Camera],
+    tra_cameras: t.List[Camera | CameraRig],
     test_cameras: t.List[Camera],
     writer: SummaryWriter,
     optimizers: t.List[t.Union[torch.optim.Optimizer, None]],
     end_of_iter_cbs: t.List[t.Union[t.Callable, None]],
+    loss_cbs: t.List[t.Callable, None] | None = None,
     background: Tensor,
+    exposure_manager: ExposureManager | None = None,
 ):
     camera_iterator = iterate_over_cameras(
         cameras=tra_cameras,
@@ -117,6 +130,7 @@ def training(
         viewpoint_cam = cur_camera["camera"]
         gt_image = cur_camera["target"]
         mask = cur_camera["mask"]
+        background = torch.rand(3, device="cuda", dtype=torch.float32)
 
         render_pkg, *_ = pose_depth_render_unified(
             viewpoint_cam,
@@ -133,19 +147,22 @@ def training(
             render_pkg["alphas"],
         )
         # accum_alpha_mask = t.cast(Tensor, accum_alphas > 0.5).float()
+        ssim_loss = 1.0 - ssim(image, gt_image)
 
+        if exposure_manager is not None:
+            image = exposure_manager(image, viewpoint_cam.image_name)
         gt_image = gt_image * mask
         image = image * mask
 
-        Ll1 = (1.0 - config.optimizer.lambda_dssim) * yiq_color_space_loss(
-            image[None, ...], gt_image[None, ...], channel_weight=(0.6, 1, 1)
-        ) + config.optimizer.lambda_dssim * (
-            1.0
-            - ssim(
-                image,
-                gt_image,
-            )
+        yiq_loss = yiq_color_space_loss(
+            image[None, ...], gt_image[None, ...], channel_weight=(0.4, 1, 1)
         )
+        rgb_loss = nn.L1Loss()(image, gt_image)
+        Ll1 = (1.0 - config.optimizer.lambda_dssim) * (
+            yiq_loss + yiq_loss
+        ) / 2 + config.optimizer.lambda_dssim * ssim_loss
+
+        # perceptual_loss = vgg_loss(image[None, ...], gt_image[None, ...])
 
         # if iteration > opt.densify_until_iter:
         loss = Ll1
@@ -160,6 +177,25 @@ def training(
                 writer.add_scalar(
                     f"train/{cur_group['name']}", cur_group["lr"], iteration
                 )
+
+        if iteration % 50 == 0 and exposure_manager is not None:
+            exposure_manager.record_exps(writer, iteration=iteration)
+
+        if iteration % 10 == 0:
+            if config.control.rig_optimization:
+                from scene.cameras_rig import camera_metrics as rig_camera_metrics
+
+                camera_opt = rig_camera_metrics(tra_cameras)
+            else:
+                camera_opt = camera_metrics(tra_cameras)
+            for key, value in camera_opt.items():
+                writer.add_scalar(f"pose_optimizer/{key}", value, iteration)
+
+        for cur_loss_cb in loss_cbs:
+            if cur_loss_cb is None:
+                continue
+            cur_loss = cur_loss_cb(iteration)
+            loss = loss + cur_loss
 
         loss.backward()
 
@@ -244,6 +280,7 @@ def main(
         save_dir=config.save_dir,
         load_iteration=None,
     )
+    logger.info(f"scene scale: {scene.cameras_extent}")
 
     if pose_checkpoint_path is not None:
         poses_checkpoint = torch.load(pose_checkpoint_path)
@@ -261,7 +298,7 @@ def main(
             config.dataset.pcd_path.as_posix(),
             remove_rgb_color=config.dataset.remove_pcd_color,
         ),
-        spatial_lr_scale=scene.cameras_extent,
+        spatial_lr_scale=20.0,
         max_sphere=config.dataset.max_sphere_distance,
         start_opacity=config.dataset.pcd_start_opacity,
     )
@@ -269,15 +306,32 @@ def main(
         f"Loaded {len(gaussians)} points from {config.dataset.pcd_path}, opacity: {config.dataset.pcd_start_opacity}"
     )
 
-    optimizer = gaussians.training_setup(config.optimizer)
+    tra_cameras = scene.getTrainCameras()
+    eval_cameras = scene.getTestCameras()
 
-    pose_optimizer = scene.pose_optimizer(lr=config.control.pose_lr_init)
-    pose_scheduler = torch.optim.lr_scheduler.StepLR(
-        pose_optimizer, step_size=config.iterations // 4, gamma=0.5
+    optimizer = gaussians.training_setup(config.optimizer)
+    pose_optimizer = create_pose_optimizer(
+        tra_cameras, lr=config.control.pose_lr_init, scene_scale=scene.cameras_extent
+    )
+
+    if config.control.rig_optimization:
+        # override the pose optimizer
+        logger.info("Using camera rig optimization")
+        tra_cameras = to_rig_cameras(tra_cameras)
+        pose_optimizer = create_pose_optimizer_rig(
+            tra_cameras,
+            lr=config.control.pose_lr_init,
+            scene_scale=scene.cameras_extent,
+        )
+
+    pose_scheduler = torch.optim.lr_scheduler.ExponentialLR(
+        pose_optimizer, gamma=(1 / 2) ** (1 / (config.iterations / 10))
     )
 
     bg_color = [1, 1, 1] if config.model.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+    # using random background
+
     tb_writer = prepare_output_and_logger(config)
     if use_bkg_model:
         logger.info("Using background model")
@@ -294,7 +348,7 @@ def main(
         bkg_gaussians = GaussianModel(1)
         bkg_gaussians.create_from_pcd(
             bkg_pcd,
-            spatial_lr_scale=scene.cameras_extent,
+            spatial_lr_scale=20.0,
             max_sphere=1.0,
             start_opacity=0.1,
         )
@@ -306,6 +360,15 @@ def main(
         bkg_gaussians = None
         bkg_optimizer = None
         update_lr_bkg_gs_callback = None
+    # ============================ exposure issue =========================
+    exposure_manager = ExposureGrid(
+        cameras=scene.getTrainCameras(), anchor_cameras=scene.getTrainCameras()[::100]
+    )
+    exposure_manager.cuda()
+    exposure_optimizer = exposure_manager.setup_optimizer(lr=8e-2, wd=1e-3)
+    exposure_scheduler = torch.optim.lr_scheduler.StepLR(
+        exposure_optimizer, step_size=config.iterations, gamma=0.5
+    )
 
     # ============================ callbacks ===============================
     update_lr_gs_callback = lambda iteration: gaussians.update_learning_rate(  # noqa
@@ -313,6 +376,14 @@ def main(
     )
 
     update_lr_pose_callback = lambda iteration: pose_scheduler.step()  # noqa
+
+    def write_pose_optimizer_lr(iteration):
+        if iteration % 10 == 0:
+            tb_writer.add_scalar(
+                "train/pose_lr", pose_optimizer.param_groups[0]["lr"], iteration
+            )
+
+    update_lr_exp_callback = lambda iteration: exposure_scheduler.step()  # noqa
 
     def upgrade_sh_degree_callback(iteration):
         # Every 1000 its we increase the levels of SH up to a maximum degree
@@ -322,25 +393,31 @@ def main(
                 bkg_gaussians.oneupSHdegree()
 
     # ============================ callbacks ===============================
-
     training(
         config=config,
         gaussians=gaussians,
         bkg_gaussian=bkg_gaussians,
         scene=scene,
         background=background,
-        tra_cameras=scene.getTrainCameras(),
-        test_cameras=scene.getTestCameras(),
+        tra_cameras=tra_cameras,
+        test_cameras=eval_cameras,
         writer=tb_writer,
-        optimizers=[pose_optimizer, optimizer, bkg_optimizer],
+        optimizers=[pose_optimizer, optimizer, bkg_optimizer, exposure_optimizer],
+        exposure_manager=exposure_manager,
         end_of_iter_cbs=[
             update_lr_gs_callback,
             update_lr_bkg_gs_callback,
             update_lr_pose_callback,
             upgrade_sh_degree_callback,
+            update_lr_exp_callback,
+            write_pose_optimizer_lr,
         ],
+        loss_cbs=[partial(exposure_manager.loss_callback, writer=tb_writer)],
     )
 
     camera_checkpoint = {x.image_id: x.state_dict() for x in scene.getTrainCameras()}
     torch.save(camera_checkpoint, config.save_dir / "camera_checkpoint.pth")
-
+    if exposure_manager is not None:
+        torch.save(
+            exposure_manager.state_dict(), config.save_dir / "exposure_manager.pth"
+        )

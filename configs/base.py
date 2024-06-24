@@ -128,6 +128,8 @@ class ControlConfig(_BaseConfig):
     include_0_epoch: bool = False
     test_iterations: List[int] = field(init=False, default_factory=lambda: [])
 
+    rig_optimization: bool = False
+
 
 if not TYPE_CHECKING:
     DATACONFIG = tyro.extras.subcommand_type_from_defaults(
@@ -196,8 +198,10 @@ class ExperimentConfig(_BaseConfig):
             if 1 not in self.control.test_iterations:
                 self.control.test_iterations.append(1)
 
+        if self.control.rig_optimization:
+            assert isinstance(self.dataset, SlamDatasetConfig), "rig optimization is only supported for slam dataset."
+
 
 if __name__ == "__main__":
-
     exp_config = tyro.cli(ExperimentConfig)
     print(exp_config)

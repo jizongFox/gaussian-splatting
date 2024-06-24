@@ -9,15 +9,27 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 import collections
+import numpy as np
 import struct
 import typing as t
-
-import numpy as np
+from dataclasses import dataclass
 
 CameraModel = collections.namedtuple(
     "CameraModel", ["model_id", "model_name", "num_params"]
 )
-Colmap_Camera = collections.namedtuple("Camera", ["id", "model", "width", "height", "params"])
+
+
+# Colmap_Camera = collections.namedtuple("Camera", ["id", "model", "width", "height", "params", "extrinsic"])
+@dataclass
+class Colmap_Camera:
+    id: int
+    model: str
+    width: int
+    height: int
+    params: np.ndarray
+    extrinsic: np.ndarray | None = None
+
+
 BaseImage = collections.namedtuple(
     "BaseImage", ["id", "qvec", "tvec", "camera_id", "name", "xys", "point3D_ids"]
 )

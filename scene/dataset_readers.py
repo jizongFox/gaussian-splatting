@@ -16,9 +16,7 @@ import os
 import sys
 import torch
 import typing as t
-from PIL import Image
 from dataclasses import dataclass
-from functools import lru_cache
 from itertools import chain
 from jaxtyping import Float
 from loguru import logger
@@ -41,11 +39,6 @@ from scene.helper import SE3_to_quaternion_and_translation_torch
 from utils.graphics_utils import getWorld2View2, focal2fov
 
 
-def _read_image(filename):
-    with Image.open(filename) as f:
-        return f.copy()
-
-
 @dataclass
 class CameraInfo:
     uid: int
@@ -65,6 +58,8 @@ class CameraInfo:
     cy: float
     focal_x: float
     focal_y: float
+
+    camera_extrinsic: np.ndarray | None = None
 
     @property
     def w2c(self) -> Float[np.ndarray, "4 4"]:
@@ -147,8 +142,8 @@ def readColmapCameras(
                 cx = intr.params[2]
                 cy = intr.params[3]
         elif intr.model == "PINHOLE":
-            focal_length_x = intr.params[0]
-            focal_length_y = intr.params[1]
+            focal_length_x = float(intr.params[0])
+            focal_length_y = float(intr.params[1])
             FovY = focal2fov(focal_length_y, height)
             FovX = focal2fov(focal_length_x, width)
             if force_centered_pp:
@@ -184,6 +179,7 @@ def readColmapCameras(
             cy=cy,
             focal_y=focal_length_y,
             focal_x=focal_length_x,
+            camera_extrinsic=intr.extrinsic,
         )
         cam_infos.append(cam_info)
     sys.stdout.write("\n")
@@ -296,8 +292,8 @@ def readColmapSceneInfo(
             xyz, rgb, _ = read_points3D_binary(bin_path)
         else:
             xyz, rgb, _ = read_points3D_text(txt_path)
-        mask = np.linalg.norm(xyz, axis=-1) <= 50
-        xyz, rgb = xyz[mask], rgb[mask]
+        # mask = np.linalg.norm(xyz, axis=-1) <= 50
+        # xyz, rgb = xyz[mask], rgb[mask]
         storePly(ply_path, xyz, rgb)
 
     if load_pcd:
@@ -347,9 +343,25 @@ def _read_slam_intrinsic_and_extrinsic(
             camera_detail["intrinsics"]["camera_matrix"][5],
         ]
         params = np.array(params).astype(float)
+        extrinsic = np.array(
+            [
+                camera_detail["qw"],
+                camera_detail["qx"],
+                camera_detail["qy"],
+                camera_detail["qz"],
+                camera_detail["x"],
+                camera_detail["y"],
+                camera_detail["z"],
+            ]
+        )
 
         cameras[camera_id] = Colmap_Camera(
-            id=camera_id, model=model, width=width, height=height, params=params
+            id=camera_id,
+            model=model,
+            width=width,
+            height=height,
+            params=params,
+            extrinsic=extrinsic,
         )
 
     # del camera_id
@@ -506,8 +518,3 @@ def readSlamSceneInfo(
         ply_path=None,
     )
     return scene_info
-
-
-@lru_cache()
-def _preload():
-    torch.inverse(torch.randn((2, 2, 2), device="cuda"))
