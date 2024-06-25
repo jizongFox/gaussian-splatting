@@ -395,14 +395,20 @@ def create_pose_optimizer(
         ]
     """
 
+    scene_scale = max(20, scene_scale)
+
     params = [
         {"params": cam2center_quat_parameters, "lr": lr, "name": "cam2center_quat"},
         {
             "params": cam2center_trans_parameters,
-            "lr": lr * scene_scale,
+            "lr": lr,
             "name": "cam2center_trans",
         },
-        {"params": center2world_quat_parameters, "lr": lr, "name": "center2world_quat"},
+        {
+            "params": center2world_quat_parameters,
+            "lr": lr * scene_scale,
+            "name": "center2world_quat",
+        },
         {
             "params": center2world_trans_parameters,
             "lr": lr * scene_scale,
