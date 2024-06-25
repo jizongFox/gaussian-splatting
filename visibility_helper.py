@@ -14,7 +14,7 @@ from configs.base import (
 from gaussian_renderer import pose_depth_render
 from scene.cameras import Camera
 from scene.creator import Scene, GaussianModel
-from scene.dataset_readers import _preload, fetchPly  # noqa
+from scene.dataset_readers import fetchPly  # noqa
 from utils.system_utils import get_hash
 from utils.train_utils import (
     prepare_output_and_logger,
