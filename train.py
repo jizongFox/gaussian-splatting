@@ -1,63 +1,16 @@
 import tyro
 from pathlib import Path
 
-from configs.base import ColmapDatasetConfig, OptimizerConfig, BackgroundConfig, ControlConfig, ExperimentConfig, \
-    ModelConfig
+from configs.base import (
+    ColmapDatasetConfig,
+    OptimizerConfig,
+    BackgroundConfig,
+    ControlConfig,
+    ExperimentConfig,
+    ModelConfig,
+)
 from train_helper import main
 
-# save_dir = Path(
-#     "/data/test_otheroffice.dslam/undistorted") / "outputs" / "colmap-11-slam-pcd-ba-BIG-reset-opacity-prune-0.01-true-slam-sh-0-more-epoch"
-# # slam_dir = Path(
-# #     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1"
-# # )
-# #
-# # slam_config = SlamDatasetConfig(
-# #     image_dir=slam_dir / "images",
-# #     mask_dir=slam_dir / "masks",
-# #     depth_dir=None,
-# #     resolution=2,
-# #     pcd_path=slam_dir
-# #     / "outputs/test_depth_loss/pretrained-poses/test-depth-loss-depth-scale-shift-depth/git_2ab75d2/input.ply",
-# #     pcd_start_opacity=0.99,
-# #     remove_pcd_color=False,
-# #     max_sphere_distance=1e-3,
-# #     force_centered_pp=False,
-# #     eval_every_n_frame=60,
-# #     eval_mode=True,
-# #     meta_file=slam_dir / "meta_updated.json",
-# # )
-# # pose_checkpoint_path = Path(
-# #     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion1/outputs/test_depth_loss/"
-# #     "pretrained-poses/test-depth-loss-depth-sparse-nerf-2/git_f47faa1/camera_checkpoint.pth"
-# # )
-# #
-# # colmap_dir = Path(
-# #     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/"
-# #     "colmap-simpler-alignment/sparse/0"
-# # )
-# colmap_config = ColmapDatasetConfig(
-#     image_dir=Path(
-#         "/data/test_otheroffice.dslam/undistorted/images"
-#     ),
-#     mask_dir=Path(
-#         "/data/test_otheroffice.dslam/undistorted/masks"
-#     ),
-#     # mask_dir=None,
-#     depth_dir=Path(
-#         "/data/test_otheroffice.dslam/undistorted/depths"
-#     ),
-#     resolution=1,
-#     pcd_path=Path(
-#         "/data/test_otheroffice.dslam/test_otheroffice-downsample-opencv-remove-outlier.ply"
-#     ),
-#     pcd_start_opacity=0.5,
-#     max_sphere_distance=1e-3,
-#     sparse_dir=Path(
-#         "/data/test_otheroffice.dslam/undistorted/colmap/BA/prior_sparse"
-#     ),
-#     force_centered_pp=False,
-#     eval_every_n_frame=45,
-# )
 save_dir = Path(
     "/home/jizong/Workspace/dConstruct/data/bundleAdjustment_korea_scene2/subregion2/outputs/3dgs-learning-rate-scheduler-3"
 )
