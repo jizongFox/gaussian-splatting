@@ -1,5 +1,3 @@
-import numpy as np
-import open3d as o3d
 import os
 import shutil
 from loguru import logger
@@ -20,15 +18,6 @@ def untar(file: Path, output_dir: Path):
     assert file.exists(), file
     output_dir.mkdir(parents=True, exist_ok=True)
     os.system(f"tar -xf {file} -C {output_dir}")
-
-
-def downsample_pcd(pcd_path: Path, output_path: Path, downsample_rate: int):
-    pcd = o3d.io.read_point_cloud(pcd_path.as_posix())
-    points = np.array(pcd.points)[::downsample_rate]
-    pcd.points = o3d.utility.Vector3dVector(points)
-    colors = np.array(pcd.colors)[::downsample_rate]
-    pcd.colors = o3d.utility.Vector3dVector(colors)
-    o3d.io.write_point_cloud(output_path.as_posix(), pcd)
 
 
 def main(dataset_dir: Path, output_dir: Path):
