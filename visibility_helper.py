@@ -14,7 +14,7 @@ from configs.base import (
 from gaussian_renderer import pose_depth_render
 from scene.cameras import Camera
 from scene.creator import Scene, GaussianModel
-from scene.dataset_readers import _preload, fetchPly  # noqa
+from scene.dataset_readers import fetchPly  # noqa
 from utils.system_utils import get_hash
 from utils.train_utils import (
     prepare_output_and_logger,
@@ -24,16 +24,17 @@ from utils.train_utils import (
 
 @torch.no_grad()
 def training(
-        *,
-        config: ExperimentConfig,
-        gaussians: GaussianModel,
-        camera_iters: t.Generator,
-        save_dir: Path,
-        background: torch.Tensor,
-        tb_writer: SummaryWriter
+    *,
+    config: ExperimentConfig,
+    gaussians: GaussianModel,
+    camera_iters: t.Generator,
+    save_dir: Path,
+    background: torch.Tensor,
+    tb_writer: SummaryWriter,
+    alpha_threshold: float = 0.8,
 ):
     point_cloud_path = (
-            config.save_dir / f"point_cloud/iteration_00000" / "point_cloud.ply"
+        config.save_dir / f"point_cloud/iteration_00000" / "point_cloud.ply"
     )
     gaussians.save_ply(point_cloud_path)
 
@@ -65,7 +66,7 @@ def training(
             render_pkg["alphas"],
         )
 
-        if accum_alphas.mean() > 0.8:
+        if accum_alphas.mean() > alpha_threshold:
             visibility_list.add(viewpoint_cam.image_name)
             with open(save_dir / "visibility.json", "w") as f:
                 json.dump(sorted(visibility_list), f)
@@ -83,7 +84,7 @@ def training(
     return visibility_list
 
 
-def main(config: ExperimentConfig):
+def main(config: ExperimentConfig, alpha_threshold: float):
     _hash = get_hash()
     config.control.save_dir = config.control.save_dir / ("git_" + _hash)
 
@@ -134,4 +135,6 @@ def main(config: ExperimentConfig):
         save_dir=config.save_dir,
         tb_writer=tb_writer,
         background=background,
+        alpha_threshold=alpha_threshold,
     )
+    return config.control.save_dir / "visibility.json"

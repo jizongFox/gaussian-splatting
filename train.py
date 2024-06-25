@@ -32,29 +32,6 @@ colmap_config = SlamDatasetConfig(
     eval_every_n_frame=45,
 )
 
-# slam_config = SlamDatasetConfig(
-#     image_dir=Path(
-#         "/data/punggol_jetty.dslam/subregion1/images"
-#     ),
-#
-#     mask_dir=Path(
-#         "/data/punggol_jetty.dslam/subregion1/masks"
-#     ),
-#     depth_dir=Path(
-#         "/data/punggol_jetty.dslam/undistorted/depths"
-#     ),
-#     resolution=1,
-#     pcd_path=Path(
-#         "/data/punggol_jetty.dslam/punggol_jetty-subregion1-opencv.ply"
-#     ),
-#     pcd_start_opacity=0.5,
-#     remove_pcd_color=False,
-#     max_sphere_distance=1e-3,
-#     eval_every_n_frame=45,
-#     eval_mode=True,
-#     meta_file=Path("/data/punggol_jetty.dslam/undistorted/meta.json"),
-# )
-
 optimizer_config = OptimizerConfig(
     position_lr_init=0.00001,
     position_lr_final=0.0000002,
