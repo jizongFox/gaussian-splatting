@@ -387,7 +387,7 @@ def main(
 
     def upgrade_sh_degree_callback(iteration):
         # Every 1000 its we increase the levels of SH up to a maximum degree
-        if iteration % 1000 == 0:
+        if iteration % 4000 == 0:
             gaussians.oneupSHdegree()
             if bkg_gaussians is not None:
                 bkg_gaussians.oneupSHdegree()

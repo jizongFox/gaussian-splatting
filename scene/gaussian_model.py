@@ -246,9 +246,11 @@ class GaussianModel:
 
     def training_setup(self, training_args) -> torch.optim.Optimizer:
         assert self.spatial_lr_scale > 0, self.spatial_lr_scale
-        self.percent_dense = training_args.percent_dense if hasattr(
-            training_args, "percent_dense"
-        ) else 0.01
+        self.percent_dense = (
+            training_args.percent_dense
+            if hasattr(training_args, "percent_dense")
+            else 0.01
+        )
         self.xyz_gradient_accum = torch.zeros((self.xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.xyz.shape[0], 1), device="cuda")
 
@@ -265,7 +267,7 @@ class GaussianModel:
             },
             {
                 "params": [self._features_rest],
-                "lr": training_args.feature_lr / 20,
+                "lr": training_args.feature_lr / 60,
                 "name": "f_rest",
             },
             {
