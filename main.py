@@ -20,11 +20,11 @@ output_dir = Path("/data/2024-06-26/colmap")
 
 use_colmap = True
 
-# process_main(
-#     tar_path,
-#     output_dir,
-#     run_colmap=use_colmap,
-# )
+process_main(
+    tar_path,
+    output_dir,
+    run_colmap=use_colmap,
+)
 
 ## training
 save_dir = output_dir / "outputs"
