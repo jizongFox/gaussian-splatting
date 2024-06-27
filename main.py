@@ -18,10 +18,12 @@ tar_path = Path(
 )
 output_dir = Path("/home/jizong/Workspace/dConstruct/data/2024-06-25")
 
+use_colmap = True
+
 process_main(
     tar_path,
     output_dir,
-    run_colmap=False,
+    run_colmap=use_colmap,
 )
 
 ## training
@@ -32,9 +34,9 @@ slam_config = SlamDatasetConfig(
     image_dir=output_dir / "subregion" / "images",
     mask_dir=output_dir / "subregion" / "masks",
     # mask_dir=None,
-    depth_dir=output_dir / "depths",
+    depth_dir=output_dir / "subregion" / "depths",
     resolution=1,
-    pcd_path=output_dir / "undistorted" / "pixel_lvl1_water2_resampled2.ply",
+    pcd_path=output_dir / "undistorted" / "opencv_pcd.ply",
     # attention to the filename, this is not fixed.
     pcd_start_opacity=0.5,
     max_sphere_distance=1e-3,
@@ -46,9 +48,9 @@ colmap_config = ColmapDatasetConfig(
     image_dir=output_dir / "subregion" / "images",
     mask_dir=output_dir / "subregion" / "masks",
     # mask_dir=None,
-    depth_dir=output_dir / "depths",
+    depth_dir=output_dir / "subregion" / "depths",
     resolution=1,
-    pcd_path=output_dir / "undistorted" / "pixel_lvl1_water2_resampled2.ply",
+    pcd_path=output_dir / "undistorted" / "opencv_pcd.ply",
     # attention to the filename, this is not fixed.
     pcd_start_opacity=0.5,
     max_sphere_distance=1e-3,
@@ -95,7 +97,7 @@ control_config = ControlConfig(
 
 exp_config = ExperimentConfig(
     model=ModelConfig(sh_degree=1, white_background=True),
-    dataset=slam_config,  # or colmap_config
+    dataset=colmap_config if use_colmap else slam_config,
     optimizer=optimizer_config,
     bkg_optimizer=bkg_optimizer_config,
     control=control_config,

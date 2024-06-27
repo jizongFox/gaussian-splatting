@@ -77,7 +77,7 @@ def process_main(dataset_dir: Path, output_dir: Path, run_colmap: bool = False):
         )
 
     dcloud_file = dcloud_files[0]
-    output_ply_path = output_dir / "undistorted" / f"{dcloud_file.stem}.ply"
+    output_ply_path = output_dir / "undistorted" / f"opencv_pcd.ply"
 
     ProcessPCDConfig(
         input_path=dcloud_file,
