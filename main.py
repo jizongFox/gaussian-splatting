@@ -14,17 +14,17 @@ from train_helper import main as train_main
 
 ## data preprocessing
 tar_path = Path(
-    "/home/jizong/Workspace/dConstruct/data/pixel_lvl1_water2_resampled.tar"
+    "/data/pixel_lvl1_water2_resampled.tar"
 )
-output_dir = Path("/home/jizong/Workspace/dConstruct/data/2024-06-25")
+output_dir = Path("/data/2024-06-26/colmap")
 
 use_colmap = True
 
-process_main(
-    tar_path,
-    output_dir,
-    run_colmap=use_colmap,
-)
+# process_main(
+#     tar_path,
+#     output_dir,
+#     run_colmap=use_colmap,
+# )
 
 ## training
 save_dir = output_dir / "outputs"
@@ -55,7 +55,7 @@ colmap_config = ColmapDatasetConfig(
     pcd_start_opacity=0.5,
     max_sphere_distance=1e-3,
     eval_every_n_frame=45,
-    sparse_dir=output_dir / "subregion" / "colmap/BA/prior_sparse",
+    sparse_dir=output_dir / "subregion" / "colmap/prior_sparse",
 )
 
 optimizer_config = OptimizerConfig(
@@ -92,7 +92,7 @@ control_config = ControlConfig(
     num_evaluations=16,
     include_0_epoch=True,
     pose_lr_init=2e-4,
-    rig_optimization=True,
+    rig_optimization=True if not use_colmap else False,
 )
 
 exp_config = ExperimentConfig(

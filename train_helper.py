@@ -157,7 +157,7 @@ def training(
         yiq_loss = yiq_color_space_loss(
             image[None, ...], gt_image[None, ...], channel_weight=(0.4, 1, 1)
         )
-        rgb_loss = nn.L1Loss()(image, gt_image)
+        # rgb_loss = nn.L1Loss()(image, gt_image)
         Ll1 = (1.0 - config.optimizer.lambda_dssim) * (
             yiq_loss + yiq_loss
         ) / 2 + config.optimizer.lambda_dssim * ssim_loss
@@ -283,7 +283,7 @@ def main(
     logger.info(f"scene scale: {scene.cameras_extent}")
 
     if pose_checkpoint_path is not None:
-        poses_checkpoint = torch.load(pose_checkpoint_path)
+        poses_checkpoint = torch.load(pose_checkpoint_path.as_posix())
         for poses in chain(scene.getTrainCameras(), scene.getTestCameras()):
             try:
                 poses.load_state_dict(poses_checkpoint[poses.image_name])
