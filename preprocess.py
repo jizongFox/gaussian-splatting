@@ -1,4 +1,5 @@
 import os
+import rich
 import shutil
 from loguru import logger
 from pathlib import Path
@@ -9,6 +10,7 @@ from dctoolbox.mask_generator.make_head_mask import HeadMaskGeneratorConfig
 from dctoolbox.mask_generator.merge_masks import MergeMasksConfig
 from dctoolbox.mask_generator.yolo_detection import YoloMaskGeneratorConfig
 from dctoolbox.process_pcd import ProcessPCDConfig
+from dctoolbox.run_colmap import ColmapRunnerWithPointTriangulation
 from dctoolbox.slam_interface_convertor import InterfaceAdaptorConfig
 from dctoolbox.undistort_image import undistort_folder
 from visibility_run import VisibilityRunConfig
@@ -17,11 +19,37 @@ from visibility_run import VisibilityRunConfig
 def untar(file: Path, output_dir: Path):
     assert file.exists(), file
     output_dir.mkdir(parents=True, exist_ok=True)
-    os.system(f"tar -xf {file} -C {output_dir}")
+    code = os.system(f"tar -xf {file} -C {output_dir}")
+    if code != 0:
+        raise RuntimeError(f"Failed to untar {file}")
 
 
-def main(dataset_dir: Path, output_dir: Path):
-    # 0. untar
+def process_main(dataset_dir: Path, output_dir: Path, run_colmap: bool = False):
+    r"""
+    at the end of the program, you should have this structure
+    .
+    ├── raw
+    │   ├── DECXIN20230102350
+    │   ├── DECXIN2023012346
+    │   ├── DECXIN2023012347
+    │   ├── DECXIN2023012348
+    │   ├── LiDAR-122322001000
+    │   ├── pixel_lvl1_water2_resampled2.dcloud
+    │   └── slamMeta.json
+    ├── subregion # optional, there would be a colmap folder.
+    │   ├── depths
+    │   ├── images
+    │   └── masks
+    │
+    └── undistorted
+        ├── images
+        ├── meta.json
+        ├── pixel_lvl1_water2_resampled2.ply
+        └── visibility
+    """
+
+    # 0. untar dataset
+    logger.info("Untaring dataset")
     untar(dataset_dir, output_dir / "raw")
 
     # 1. convert interface
@@ -40,7 +68,7 @@ def main(dataset_dir: Path, output_dir: Path):
         converted_meta_json_path=output_dir / "undistorted" / "meta.json",
     )
 
-    # 6. downsample pcd.
+    # 3. downsample pcd.
     logger.info("Downsampling pcd")
     dcloud_files = list((output_dir / "raw").glob("*.dcloud"))
     if len(dcloud_files) != 1:
@@ -58,7 +86,7 @@ def main(dataset_dir: Path, output_dir: Path):
         convert_to_opencv=True,
     ).main()
 
-    # 7. Run Visibility Check
+    # 4. Run Visibility Check
     logger.info("Running visibility check")
     visibility_path = VisibilityRunConfig(
         image_dir=output_dir / "undistorted" / "images",
@@ -69,27 +97,27 @@ def main(dataset_dir: Path, output_dir: Path):
         alpha_threshold=0.8,
     ).main()
 
-    # 8. Create Subregion
+    # 5. Create Subregion
     SubregionConfig(
         image_dir=output_dir / "undistorted" / "images",
         visibility_json=visibility_path,
         output_dir=output_dir / "subregion",
     ).main()
 
-    # 3. generate yolo mask
+    # 6. generate yolo mask
     YoloMaskGeneratorConfig(
         image_dir=output_dir / "subregion" / "images",
         mask_dir=output_dir / "subregion" / "mask_yolo",
         extension=".jpeg",
     ).main()
-    # 4. generate head mask
+    # 7. generate head mask
     HeadMaskGeneratorConfig(
         image_dir=output_dir / "subregion" / "images",
         mask_dir=output_dir / "subregion" / "mask_head",
         extension=".jpeg",
     ).main()
 
-    # 4. merge mask
+    # 8. merge mask
     MergeMasksConfig(
         mask_dirs=[
             output_dir / "subregion" / "mask_yolo",
@@ -101,14 +129,35 @@ def main(dataset_dir: Path, output_dir: Path):
     shutil.rmtree(output_dir / "subregion" / "mask_yolo")
     shutil.rmtree(output_dir / "subregion" / "mask_head")
 
-    # 5. Get Depth
+    # 9. Get Depth
+    logger.info("Running depth model")
     run_depth(
         input_dir=output_dir / "subregion" / "images",
         output_dir=output_dir / "subregion" / "depths",
     )
 
+    # 10. optional, run colmap
+    if run_colmap:
+        logger.info("Running colmap, this can take a while")
+        colmap_config = ColmapRunnerWithPointTriangulation(
+            data_dir=output_dir / "subregion",
+            image_folder_name="images",
+            mask_folder_name="masks",
+            experiment_name="colmap",
+            matching_type="vocab_tree",
+            prior_injection=True,
+            image_extension="jpeg",
+            rig_bundle_adjustment=True,
+            refinement_time=1,
+            meta_file=output_dir / "undistorted" / "meta.json",
+        )
+        rich.print(colmap_config)
+        colmap_config.main()
 
-main(
-    Path("/home/jizong/Workspace/dConstruct/data/pixel_lvl1_water2_resampled.tar"),
-    Path("/home/jizong/Workspace/dConstruct/data/2024-06-25"),
-)
+
+if __name__ == "__main__":
+    process_main(
+        Path("/home/jizong/Workspace/dConstruct/data/pixel_lvl1_water2_resampled.tar"),
+        Path("/home/jizong/Workspace/dConstruct/data/2024-06-25"),
+        run_colmap=True,
+    )
