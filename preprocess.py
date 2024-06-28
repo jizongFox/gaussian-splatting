@@ -44,7 +44,7 @@ def process_main(dataset_dir: Path, output_dir: Path, run_colmap: bool = False):
     └── undistorted
         ├── images
         ├── meta.json
-        ├── pixel_lvl1_water2_resampled2.ply
+        ├── opencv-pcd.ply
         └── visibility
     """
 
@@ -70,17 +70,17 @@ def process_main(dataset_dir: Path, output_dir: Path, run_colmap: bool = False):
 
     # 3. downsample pcd.
     logger.info("Downsampling pcd")
-    dcloud_files = list((output_dir / "raw").glob("*.dcloud"))
-    if len(dcloud_files) != 1:
+    pcd_files = list((output_dir / "raw").glob("*.dcloud"))
+    if len(pcd_files) != 1:
         raise ValueError(
             "There should be only one .dcloud file in the dataset directory"
         )
 
-    dcloud_file = dcloud_files[0]
+    ply_file: Path = pcd_files[0]
     output_ply_path = output_dir / "undistorted" / f"opencv_pcd.ply"
 
     ProcessPCDConfig(
-        input_path=dcloud_file,
+        input_path=ply_file,
         output_path=output_ply_path,
         voxel_size=None,
         convert_to_opencv=True,

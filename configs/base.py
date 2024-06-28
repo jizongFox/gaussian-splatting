@@ -40,8 +40,11 @@ class DatasetConfig:
     pcd_start_opacity: float = 0.1
     """ starting opacity for the point cloud. """
     remove_pcd_color: bool = False
+    """ if remove pre-existing colors"""
 
     max_sphere_distance: float = 1e-3
+    """the max sphere distance for all gaussian points when initializing"""
+
     force_centered_pp: bool = False
     """ force the principal point to be centered. """
 
@@ -66,26 +69,42 @@ class SlamDatasetConfig(DatasetConfig):
 @dataclass(kw_only=True)
 class _OptimizationConfig(_BaseConfig):
     position_lr_init: float = 0.00016
+    """ initial learning rate for position xyz."""
     position_lr_final: float = 0.000016
+    """ final learning rate for position xyz."""
     position_lr_delay_mult: float = 0.01
+    """ delay multiplier for position xyz."""
     position_lr_max_steps: int = 30_000
+    """ max steps for position xyz."""
     feature_lr: float = 0.025
+    """ learning rate for features."""
     opacity_lr: float = 0.05
+    """ learning rate for opacity."""
     scaling_lr: float = 0.005
+    """ learning rate for scaling."""
     rotation_lr: float = 0.005
+    """ learning rate for rotation."""
 
 
 @dataclass(kw_only=True)
 class OptimizerConfig(_OptimizationConfig):
-    percent_dense: float = 0.01  # this is to reduce the size of the eclipse
-    lambda_dssim: float = 0.2
-    densification_interval: int = 500
-    opacity_reset_interval: int = 500000000
-    densify_from_iter: int = 4000
-    densify_until_iter: int = 12_000
-    densify_grad_threshold: float = 0.00001  # this is to split more
+    percent_dense: float = 0.01
+    """this is to reduce the size of the eclipse in a global scale."""
 
+    lambda_dssim: float = 0.2
+    """ dssim loss weight. 0 means L1 loss. 1 means ssmi loss."""
+    densification_interval: int = 500
+    """ densification interval."""
+    opacity_reset_interval: int = 500000000
+    """ opacity reset interval."""
+    densify_from_iter: int = 4000
+    """ densify from which iter."""
+    densify_until_iter: int = 12_000
+    """ densify until which iter."""
+    densify_grad_threshold: float = 0.00001  # this is to split more
+    """ densify grad threshold. if small, more points are being densified"""
     min_opacity: float = 1e-5
+    """ minimum opacity for the point cloud. if lower than this threshold, the point should be pruned."""
 
     def __post_init__(self):
         if self.lambda_dssim == 0:
@@ -120,15 +139,23 @@ class FinetuneOptimizerConfig(OptimizerConfig):
 
 @dataclass(kw_only=True)
 class ControlConfig(_BaseConfig):
+    # help me to add detailed comments
     save_dir: Path
+    """ save directory. """
+
     iterations: int = 15_000
+    """total iteration for training"""
     pose_lr_init: float = 0.0
+    """learning rate for pose refinement"""
 
     num_evaluations: int = 10
+    """ number of evaluation. """
     include_0_epoch: bool = False
+    """ if include the first epoch for evaluation. """
     test_iterations: List[int] = field(init=False, default_factory=lambda: [])
 
     rig_optimization: bool = False
+    """ if use rig optimization. (device center and four camera extrinsic) """
 
 
 if not TYPE_CHECKING:
@@ -199,7 +226,9 @@ class ExperimentConfig(_BaseConfig):
                 self.control.test_iterations.append(1)
 
         if self.control.rig_optimization:
-            assert isinstance(self.dataset, SlamDatasetConfig), "rig optimization is only supported for slam dataset."
+            assert isinstance(
+                self.dataset, SlamDatasetConfig
+            ), "rig optimization is only supported for slam dataset."
 
 
 if __name__ == "__main__":

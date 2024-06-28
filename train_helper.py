@@ -19,7 +19,7 @@ from functools import partial
 from itertools import chain
 from loguru import logger
 from pathlib import Path
-from torch import Tensor, nn
+from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -116,6 +116,26 @@ def training(
     background: Tensor,
     exposure_manager: ExposureManager | None = None,
 ):
+    """
+    Trains a GaussianModel using the provided configuration and data.
+
+    Args:
+        config (ExperimentConfig): The configuration for the training.
+        gaussians (GaussianModel): The GaussianModel to be trained.
+        bkg_gaussian (GaussianModel | None, optional): The background GaussianModel. Defaults to None.
+        scene (Scene): The Scene object containing the data.
+        tra_cameras (List[Camera | CameraRig]): The training cameras.
+        test_cameras (List[Camera]): The test cameras.
+        writer (SummaryWriter): The SummaryWriter object for logging.
+        optimizers (List[t.Union[torch.optim.Optimizer, None]]): The optimizers for training.
+        end_of_iter_cbs (List[t.Union[t.Callable, None]]): The callbacks to be executed at the end of each iteration.
+        loss_cbs (List[t.Callable, None] | None, optional): The callbacks for computing additional losses. Defaults to None.
+        background (Tensor): The background tensor.
+        exposure_manager (ExposureManager | None, optional): The exposure manager. Defaults to None.
+
+    Returns:
+        None
+    """
     camera_iterator = iterate_over_cameras(
         cameras=tra_cameras,
         data_conf=config.dataset,
@@ -126,11 +146,16 @@ def training(
     indicator = tqdm(range(1, config.iterations + 1))
 
     for iteration in indicator:
+        """
+        for loop part for training, where logger should be added.
+        """
+
         cur_camera = next(camera_iterator)
         viewpoint_cam = cur_camera["camera"]
         gt_image = cur_camera["target"]
         mask = cur_camera["mask"]
         background = torch.rand(3, device="cuda", dtype=torch.float32)
+        # using random background for better quality
 
         render_pkg, *_ = pose_depth_render_unified(
             viewpoint_cam,
@@ -377,8 +402,17 @@ def main(
 
     update_lr_pose_callback = lambda iteration: pose_scheduler.step()  # noqa
 
-    def write_pose_optimizer_lr(iteration):
+    def write_pose_optimizer_lr(iteration: int) -> None:
+        """
+        Writes the current learning rate of the pose optimizer to the TensorBoard writer.
+
+        Args:
+            iteration (int): The current iteration number.
+        """
+        # Check if the current iteration is a multiple of 10
         if iteration % 10 == 0:
+            # Add a scalar value to the TensorBoard writer with the name "train/pose_lr"
+            # The value is the current learning rate of the first parameter group of the pose optimizer
             tb_writer.add_scalar(
                 "train/pose_lr", pose_optimizer.param_groups[0]["lr"], iteration
             )
@@ -386,9 +420,18 @@ def main(
     update_lr_exp_callback = lambda iteration: exposure_scheduler.step()  # noqa
 
     def upgrade_sh_degree_callback(iteration):
-        # Every 1000 its we increase the levels of SH up to a maximum degree
+        """
+        Callback function to increase the levels of SH up to a maximum degree every 4000 iterations.
+
+        Args:
+            iteration (int): The current iteration number.
+        """
+        # Check if the current iteration is divisible by 4000
         if iteration % 4000 == 0:
+            # Increase the SH degree of the gaussians model
             gaussians.oneupSHdegree()
+
+            # If bkg_gaussians is not None, also increase its SH degree
             if bkg_gaussians is not None:
                 bkg_gaussians.oneupSHdegree()
 
